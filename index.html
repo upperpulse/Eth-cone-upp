@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5 — nattajoe</title>
+<title>ETH Cone v5.2 — nattajoe</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#02080f;--bg2:#050e1a;--bg3:#081422;--green:#00ff9d;--red:#ff2d55;--yellow:#ffc700;--cyan:#00d4ff;--orange:#ff6b2b;--purple:#a855f7;--dim:#0b1c2e;--text:#9dc8e8;--muted:#2a4a6a;--border:#0a1e35;}
@@ -361,6 +361,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
       <div class="srow"><span class="sk">Momentum</span><span class="sv" id="sedMom">—</span></div>
       <div class="srow"><span class="sk">Signal</span><span class="sv" id="sedSig" style="font-size:11px;font-weight:700;">—</span></div>
       <div style="margin-top:10px;padding:8px;border-radius:3px;text-align:center;font-size:10px;letter-spacing:2px;border:1px solid var(--muted);color:var(--muted);" id="sedVerdict">WAITING FOR DATA</div>
+      <div style="font-size:8px;color:var(--muted);margin-top:6px;font-family:'Share Tech Mono',monospace;padding:4px 6px;background:var(--dim);border-radius:2px;" id="confDebug">Conf: —</div>
     </div>
   </div>
   <div class="card or">
@@ -560,7 +561,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
     <div class="ctitle">📊 MULTI-TF LIVE — Binance API · <span id="btScoreEl" style="color:var(--yellow);">Rolling Backtest...</span></div>
     <div style="overflow-x:auto;">
       <table class="tbl">
-        <thead><tr><th>TF</th><th>CLOSE</th><th>EMA20</th><th>MACD HIST</th><th>ATR</th><th>VOL</th><th>TREND</th><th>BIAS</th></tr></thead>
+        <thead><tr><th>TF</th><th>CLOSE</th><th>EMA20</th><th>MACD HIST</th><th>ATR</th><th>VOL</th><th>RSI</th><th>BIAS</th></tr></thead>
         <tbody id="tfBody"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px;"><span class="spin-ico"></span> กำลังโหลด...</td></tr></tbody>
       </table>
     </div>
@@ -613,6 +614,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   <div style="display:flex;justify-content:flex-end;margin-top:4px;gap:6px;">
     <button class="cbtn cy" onclick="exportCSV()" style="font-size:8px;padding:5px 10px;">📥 Export CSV</button>
     <button class="cbtn rd" onclick="clearHistory()" style="font-size:8px;padding:5px 10px;">🗑️ ล้างประวัติ</button>
+    <button class="cbtn cy" onclick="exportCSV()" style="font-size:8px;padding:5px 10px;">📥 Export CSV</button>
   </div>
 </div>
 
@@ -668,24 +670,35 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   <div class="an-prog"><div class="an-pf" id="anPF" style="width:0%;"></div></div>
 </div>
 
+
 <script>
 // ═══════════════════════════════════════
-// BASELINE: Multi-TF Cone Model v5 — nattajoe
+// ETH CONE ULTIMATE v5.2 — nattajoe
+// FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
+//        OBV Divergence 15-candle, crossBonus proportional,
+//        Whale Liq Dynamic, OBV Slope fix,
+//        RSI warm-up, F&G 6H cache, CSV Export
 // ═══════════════════════════════════════
-const BASE='https://fapi.binance.com',SYM='ETHUSDT',LKEY='eth_cone_v52_log';
+const BASE='https://fapi.binance.com',SYM='ETHUSDT',LKEY='eth_cone_v5_log';
+
+// ── STATE ──
 let soundOn=true,notifGranted=false,curPrice=0,sigma=52,atrVal=52;
 let priceHist=[],refCount=5,wakeLock=null;
 let alTrig={short:false,long:false,whale:false,sl:false};
-// FIX 1: fundingRate = global state variable (ไม่อ่านจาก DOM)
+
+// FIX 1: fundingRate เป็น global state ไม่อ่านจาก DOM
 let fundingRate=0;
-// FIX 6: Whale Liq Dynamic — Entry × (1 - 1/lev + maintenanceMargin)
-const WHALE_ENTRY=2288,WHALE_LEV=15;
-const WHALE_LIQ_EST=Math.round(WHALE_ENTRY*(1-1/WHALE_LEV+0.005));
+
+// FIX 6: Whale Liq Dynamic — คำนวณจาก Entry × (1 - 1/lev + maintenanceMargin)
+const WHALE_ENTRY=2288,WHALE_LEV=15,WHALE_MAINT=0.005;
+const WHALE_LIQ_EST=Math.round(WHALE_ENTRY*(1-1/WHALE_LEV+WHALE_MAINT)); // ≈ $2,146
+
 // FIX 9: Fear & Greed 6H Cache
 let fgCache={val:33,ts:0};
+
 // Cone
 let C={shortLow:0,shortHigh:0,longLow:0,longHigh:0,
-       whaleLiq:WHALE_LIQ_EST,// ≈$2,146 estimated liq price
+       whaleLiq:WHALE_LIQ_EST,
        slLong:0,slShort:0,
        muEntry:0,muTP:0,muTrail:0,sConf:0,lConf:0,
        sTP1:0,sTP2:0,sSL:0,lTP1:0,lTP2:0,lSL:0};
@@ -726,7 +739,7 @@ function registerSW(){
   if(!('serviceWorker' in navigator))return;
   const code=`self.addEventListener('message',e=>{if(e.data&&e.data.type==='ALERT'){self.registration.showNotification(e.data.title,{body:e.data.body,vibrate:[200,100,200],tag:e.data.tag||'eth',renotify:true});}});`;
   const url=URL.createObjectURL(new Blob([code],{type:'application/javascript'}));
-  navigator.serviceWorker.register(url,{scope:'/'}).then(r=>{window._swReg=r;addLog('✅ Service Worker — Background Alert พร้อม','var(--green)','var(--green)');}).catch(()=>{});
+  navigator.serviceWorker.register(url,{scope:'/'}).then(r=>{window._swReg=r;addLog('✅ SW — Background Alert พร้อม','var(--green)','var(--green)');}).catch(()=>{});
 }
 function sendNotif(title,body,tag='eth'){
   if(window._swReg&&window._swReg.active)window._swReg.active.postMessage({type:'ALERT',title,body,tag});
@@ -736,7 +749,7 @@ function sendNotif(title,body,tag='eth'){
 // Wake Lock
 async function reqWakeLock(){
   if(!('wakeLock' in navigator))return;
-  try{wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null;});addLog('🔆 Wake Lock เปิด','var(--cyan)');}catch{}
+  try{wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null;});}catch{}
 }
 async function relWakeLock(){if(wakeLock)try{await wakeLock.release();}catch{}wakeLock=null;}
 
@@ -747,7 +760,7 @@ function requestNotif(){
     notifGranted=p==='granted';
     if(notifGranted){el('notifBanner').classList.add('gone');el('btnNotif').textContent='✅ Notification On';
       addLog('✅ Notification เปิด','var(--green)','var(--green)');registerSW();
-      setTimeout(()=>sendNotif('ETH Cone v5 ✅','Baseline Ready'),500);}
+      setTimeout(()=>sendNotif('ETH Cone v5.2 ✅','Baseline Ready'),500);}
     else addLog('⚠️ ไม่ได้รับอนุญาต','var(--yellow)');});
 }
 
@@ -780,61 +793,68 @@ function addLog(msg,color='var(--text)',dot='var(--cyan)'){
 // FETCH LAYER
 // ═══════════════════════════════════════
 async function fetchTicker(){try{const r=await fetch(`${BASE}/fapi/v1/ticker/24hr?symbol=${SYM}`);return await r.json();}catch{return null;}}
-// FIX 1: fetchFunding → เก็บใน global fundingRate ทันที
 async function fetchFunding(){
   try{
     const r=await fetch(`${BASE}/fapi/v1/premiumIndex?symbol=${SYM}`);
     const d=await r.json();
-    fundingRate=parseFloat(d.lastFundingRate)*100; // เก็บ global
+    // FIX 1: เก็บเป็น state variable ไม่พึ่ง DOM
+    fundingRate=parseFloat(d.lastFundingRate)*100;
     return d;
   }catch{return null;}}
 async function fetchKlines(iv,limit=100){try{const r=await fetch(`${BASE}/fapi/v1/klines?symbol=${SYM}&interval=${iv}&limit=${limit}`);return await r.json();}catch{return[];}}
-async function fetchBTC(){try{const r=await fetch(`${BASE}/fapi/v1/ticker/24hr?symbol=BTCUSDT`);return await r.json();}catch{return null;}}
-async function fetchBTCKlines(iv='1h',limit=50){try{const r=await fetch(`${BASE}/fapi/v1/klines?symbol=BTCUSDT&interval=${iv}&limit=${limit}`);return await r.json();}catch{return[];}}
-// FIX 9: Fear & Greed — 6 ชั่วโมง Cache ไม่ดึงซ้ำ
+async function fetchBTCKlines(iv='1h',limit=60){try{const r=await fetch(`${BASE}/fapi/v1/klines?symbol=BTCUSDT&interval=${iv}&limit=${limit}`);return await r.json();}catch{return[];}}
+
+// FIX 9: Fear & Greed — 6H Cache
 async function fetchFearGreed(){
-  const now=Date.now();
-  if(now-fgCache.ts<21600000)return fgCache.val; // 6H cache
+  const SIX_HOURS=6*3600*1000;
+  if(Date.now()-fgCache.ts<SIX_HOURS)return fgCache.val;
   try{
     const r=await fetch('https://api.alternative.me/fng/?limit=1');
     const d=await r.json();
-    const v=parseInt(d.data[0].value);
-    fgCache={val:v,ts:now};
-    return v;
-  }catch{return fgCache.val;}}
-// Rolling 7D Backtest — Long + Short side
+    fgCache={val:parseInt(d.data[0].value),ts:Date.now()};
+    return fgCache.val;
+  }catch{return fgCache.val;}
+}
+
+// FIX 2: Rolling Backtest — Both Long AND Short
 async function calcRollingHitRatio(iv='1h'){
   try{
-    const k=await fetchKlines(iv,200);if(k.length<50)return{ratio:0.7,score:75,long:0.7,short:0.7};
+    const k=await fetchKlines(iv,200);
+    if(k.length<50)return{ratio:0.68,ratioL:0.68,ratioS:0.68,score:74};
     const cls=k.map(c=>parseFloat(c[4]));
-    let lHits=0,lTotal=0,sHits=0,sTotal=0;
-    for(let i=30;i<cls.length-10;i++){
+    let hitsL=0,totalL=0,hitsS=0,totalS=0;
+    for(let i=30;i<cls.length-12;i++){
       const atr=calcATR(k.slice(0,i),14)*0.95;
       const entry=cls[i];
       // Long test
-      const lTP=entry+atr*0.9,lSL=entry-atr*0.85;
-      let lHit=false,lStop=false;
-      // Short test
-      const sTP=entry-atr*0.9,sSL=entry+atr*0.85;
-      let sHit=false,sStop=false;
-      for(let j=i+1;j<Math.min(i+10,cls.length);j++){
+      const tp1L=entry+atr*0.9,slL=entry-atr*0.85;
+      let hitTPL=false,hitSLL=false;
+      for(let j=i+1;j<Math.min(i+12,cls.length);j++){
         const h=parseFloat(k[j][2]),l=parseFloat(k[j][3]);
-        if(!lHit&&!lStop){if(h>=lTP){lHit=true;}else if(l<=lSL){lStop=true;}}
-        if(!sHit&&!sStop){if(l<=sTP){sHit=true;}else if(h>=sSL){sStop=true;}}
+        if(h>=tp1L&&!hitSLL){hitTPL=true;break;}
+        if(l<=slL&&!hitTPL){hitSLL=true;break;}
       }
-      if(lHit||lStop){lTotal++;if(lHit)lHits++;}
-      if(sHit||sStop){sTotal++;if(sHit)sHits++;}
+      if(hitTPL||hitSLL){totalL++;if(hitTPL)hitsL++;}
+      // Short test
+      const tp1S=entry-atr*0.9,slS=entry+atr*0.85;
+      let hitTPS=false,hitSLS=false;
+      for(let j=i+1;j<Math.min(i+12,cls.length);j++){
+        const h=parseFloat(k[j][2]),l=parseFloat(k[j][3]);
+        if(l<=tp1S&&!hitSLS){hitTPS=true;break;}
+        if(h>=slS&&!hitTPS){hitSLS=true;break;}
+      }
+      if(hitTPS||hitSLS){totalS++;if(hitTPS)hitsS++;}
     }
-    const lRatio=lTotal>0?lHits/lTotal:0.7;
-    const sRatio=sTotal>0?sHits/sTotal:0.7;
-    const ratio=(lRatio+sRatio)/2;
+    const ratioL=totalL>0?hitsL/totalL:0.68;
+    const ratioS=totalS>0?hitsS/totalS:0.62;
+    const ratio=(ratioL+ratioS)/2;
     const score=Math.round(50+ratio*50);
-    return{ratio,score,long:lRatio,short:sRatio};
-  }catch{return{ratio:0.7,score:75,long:0.7,short:0.7};}
+    return{ratio,ratioL,ratioS,score};
+  }catch{return{ratio:0.68,ratioL:0.68,ratioS:0.62,score:74};}
 }
 
 // ═══════════════════════════════════════
-// MATH LAYER — PHASE 1: Real OBV + RSI
+// MATH LAYER
 // ═══════════════════════════════════════
 function calcEMA(arr,n){const k=2/(n+1);let e=arr[0];arr.forEach(v=>e=v*k+e*(1-k));return e;}
 function calcATR(k,n=14){
@@ -850,56 +870,70 @@ function calcMACD(arr){
 function calcVolZ(vols){const mn=vols.reduce((a,b)=>a+b,0)/vols.length;const std=Math.sqrt(vols.reduce((a,b)=>a+(b-mn)**2,0)/vols.length);return std===0?0:(vols[vols.length-1]-mn)/std;}
 function calcWick(k){const l=k[k.length-1];const o=parseFloat(l[1]),h=parseFloat(l[2]),lo=parseFloat(l[3]),c=parseFloat(l[4]);const body=Math.abs(c-o),total=h-lo;return total===0?0:(total-body)/total;}
 
-// FIX 4: Real OBV — Divergence ใช้ 15 แท่ง (จาก 5 แท่ง)
+// Real OBV — Cumulative + Slope + FIX 4: 15-candle Divergence
 function calcRealOBV(klines){
+  if(!klines||klines.length<2)return{obv:0,trend:'FLAT',pos:false,slope:0,divergence:false,arr:[]};
   let obv=0;const obvArr=[0];
   for(let i=1;i<klines.length;i++){
     const c=parseFloat(klines[i][4]),p=parseFloat(klines[i-1][4]),v=parseFloat(klines[i][5]);
     if(c>p)obv+=v;else if(c<p)obv-=v;
     obvArr.push(obv);}
   const last=obvArr[obvArr.length-1];
-  // FIX 4: ใช้ 15 แท่งสำหรับ Divergence Detection
-  const win=Math.min(15,obvArr.length-1);
-  const prevWin=obvArr.slice(-win-1,-1);
-  const avgWin=prevWin.reduce((a,b)=>a+b,0)/prevWin.length;
-  const trend=last>avgWin?'UP':last<avgWin?'DOWN':'FLAT';
-  // FIX 4: Higher High Price vs Lower High OBV Divergence
-  const priceNow=parseFloat(klines[klines.length-1][4]);
-  const priceWinAgo=parseFloat(klines[Math.max(0,klines.length-win-1)][4]);
-  const obvRising=last>avgWin;
-  const priceRising=priceNow>priceWinAgo;
-  const divergence=obvRising!==priceRising;
-  const ema9obv=calcEMA(obvArr.slice(-20),9);
-  // FIX 7: OBV Slope — ใช้ prev6 เป็น denominator แทน avg5
-  const prev6=obvArr[Math.max(0,obvArr.length-7)];
-  const slope=prev6!==0?(last-prev6)/Math.abs(prev6)*100:0;
-  return{obv:last,trend,pos:trend==='UP',slope,divergence,ema9obv,arr:obvArr};}
+  // FIX 7: OBV Slope — ใช้ prev absolute value ไม่ใช่ avg ใน denominator
+  const prev6=obvArr[obvArr.length-7]||obvArr[0];
+  const slopeDenom=Math.abs(prev6)||1;
+  const slope=(last-prev6)/slopeDenom*100; // % change
+  // FIX 4: Divergence — ใช้ 15 แท่ง, ตรวจ Higher High Price vs Lower High OBV
+  let divergence=false;
+  if(klines.length>=16){
+    const priceWindow=klines.slice(-15).map(k=>parseFloat(k[4]));
+    const obvWindow=obvArr.slice(-15);
+    const priceHH=priceWindow[priceWindow.length-1]>Math.max(...priceWindow.slice(0,-1));
+    const obvHH=obvWindow[obvWindow.length-1]>Math.max(...obvWindow.slice(0,-1));
+    const priceLL=priceWindow[priceWindow.length-1]<Math.min(...priceWindow.slice(0,-1));
+    const obvLL=obvWindow[obvWindow.length-1]<Math.min(...obvWindow.slice(0,-1));
+    divergence=(priceHH&&!obvHH)||(priceLL&&!obvLL); // Bearish or Bullish divergence
+  }
+  const prev15avg=obvArr.slice(-15).reduce((a,b)=>a+b,0)/Math.min(15,obvArr.length);
+  const trend=last>prev15avg?'UP':last<prev15avg?'DOWN':'FLAT';
+  return{obv:last,trend,pos:slope>0,slope,divergence,arr:obvArr};}
 
-// FIX 8: Real RSI — warm-up threshold 30 แท่ง
+// FIX 8: Real RSI — warm-up threshold 30+ candles
 function calcRSI(arr,n=14){
-  if(arr.length<Math.max(n+1,30))return 50; // FIX: ต้องการ ≥30 แท่ง
+  if(arr.length<n+16)return 50; // warm-up: n + buffer
   let gains=0,losses=0;
   for(let i=1;i<=n;i++){const d=arr[i]-arr[i-1];if(d>0)gains+=d;else losses-=d;}
   let avgG=gains/n,avgL=losses/n;
   for(let i=n+1;i<arr.length;i++){
     const d=arr[i]-arr[i-1];
-    avgG=(avgG*(n-1)+(d>0?d:0))/n;avgL=(avgL*(n-1)+(d<0?-d:0))/n;}
-  const rs=avgL===0?100:avgG/avgL;return Math.min(100,Math.max(0,100-(100/(1+rs))));}
+    avgG=(avgG*(n-1)+(d>0?d:0))/n;
+    avgL=(avgL*(n-1)+(d<0?-d:0))/n;}
+  const rs=avgL===0?100:avgG/avgL;return 100-(100/(1+rs));}
 
 // FIX 5: ML Spike — crossBonus proportional to histogram magnitude
-function calcSpikeProb(volZ,realOBV,muSlope,atrVal,macdCross,macdHistMag,rsi){
+function calcSpikeProb(volZ,realOBV,muSlope,atrVal,macd,rsi){
   const volScore=Math.min(1,Math.abs(volZ)/3);
-  const obvScore=Math.min(1,Math.abs(realOBV.slope)/50); // FIX 7: slope เป็น % แล้ว
+  const obvScore=Math.min(1,Math.abs(realOBV.slope)/50); // slope เป็น %
   const slopeScore=Math.min(1,Math.abs(muSlope)/2);
   const atrScore=Math.min(1,atrVal/80);
-  // FIX 5: crossBonus scale ตาม histogram magnitude ไม่ใช่ fixed 0.15
-  const crossBonus=macdCross?Math.min(0.15,Math.abs(macdHistMag)/(atrVal*0.01||1)*0.05):0;
-  const rsiScore=rsi<30||rsi>70?0.1:rsi<35||rsi>65?0.05:0;
-  const raw=volScore*.28+obvScore*.25+slopeScore*.18+atrScore*.12+crossBonus+rsiScore+0.02;
+  // FIX 5: crossBonus ∝ histogram magnitude ไม่ใช่ fixed 0.15
+  const histMag=Math.abs(macd.last)/(atrVal||1);
+  const crossBonus=macd.cross?Math.min(0.18,histMag*0.5):0;
+  const rsiScore=(rsi<32||rsi>68)?0.08:0;
+  const raw=volScore*.28+obvScore*.22+slopeScore*.18+atrScore*.12+crossBonus+rsiScore+0.02;
   return Math.min(.99,raw);}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.1 — PHASE 1-3 FIXES
+// FIX 3: Confidence Normalize ด้วย max possible score
+// ═══════════════════════════════════════
+// Long max raw: 52+10+9+7+5+4+7+5+4+7+8+12+8 = 138 → normalize to 0-100
+// Short max raw: 52+9+9+6+4+4+6+7+8+8 = 113 → normalize
+const LCONF_MAX=138,SCONF_MAX=113;
+function normalizeConf(raw,maxRaw,cap=96){
+  return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
+
+// ═══════════════════════════════════════
+// BASELINE ENGINE v5.2
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -909,8 +943,6 @@ async function runEngine(kd){
   const cls4h=h4.map(k=>parseFloat(k[4]));
   const price=cls1h[cls1h.length-1];
   atrVal=calcATR(h1,14);sigma=atrVal*.95;
-
-  // EMA Stack
   const ema9=calcEMA(cls1h,9);
   const ema20=calcEMA(cls1h,20);
   const ema50=calcEMA(cls1h.slice(-50),50);
@@ -934,18 +966,18 @@ async function runEngine(kd){
   const macd1h=calcMACD(cls1h);
   const macd4h=calcMACD(cls4h);
 
-  // FIX 1: Real OBV Cumulative
+  // Real OBV (FIX 4+7 inside calcRealOBV)
   const realOBV=calcRealOBV(h1);
   const realOBV4h=calcRealOBV(h4);
   const obvPos=realOBV.pos;
   const obvDivergence=realOBV.divergence;
 
-  // FIX 2: Real RSI
+  // RSI (FIX 8: warm-up)
   const rsi=calcRSI(cls1h,14);
   const rsiOversold=rsi<35;
   const rsiOverbought=rsi>65;
 
-  // Volume Z-Score
+  // Vol Z-Score + Wick + µSlope
   const volZ=calcVolZ(vols1h.slice(-20));
   const wickR=calcWick(h1);
   const muSlope=(cls1h[cls1h.length-1]-cls1h[cls1h.length-6])/(sigma||1);
@@ -953,58 +985,52 @@ async function runEngine(kd){
   const maStack=price>ema9&&ema9>ema20;
   const maStackBull=price>ema9&&ema9>ema20&&ema20>ema50;
 
-  // FIX 5: ส่ง histogram magnitude เข้า calcSpikeProb
-  const spikeProb=calcSpikeProb(volZ,realOBV,muSlope,atrVal,macd1h.cross,Math.abs(macd1h.last),rsi);
+  // ML Spike (FIX 5: proportional crossBonus)
+  const spikeProb=calcSpikeProb(volZ,realOBV,muSlope,atrVal,macd1h,rsi);
   const mlTrigger=spikeProb>=.82;
 
-  // Breakout Score — ใช้ Real OBV Divergence
+  // Breakout Score
   const muBreakPct=Math.abs((price-C.muEntry)/C.muEntry*100);
-  const obvDivScore=obvDivergence?.85:(macd1h.positive!==obvPos?.6:.2);
+  const obvDivScore=obvDivergence?.85:(macd1h.positive!==obvPos?.55:.15);
   const bScore=Math.min(100,(muBreakPct*8+obvDivScore*22+Math.min(28,Math.abs(volZ)*10)+wickR*12+(rsiOversold||rsiOverbought?8:0)));
   const statTrig=bScore>=85;
 
-  // PreBurst Watch — ใช้ Real OBV slope
+  // PreBurst Watch
   let preburst='NEUTRAL';
-  const obvSlope=realOBV.slope;
-  if(maStack&&macd1h.positive&&obvSlope>0)preburst='LONG ACTIVE';
-  else if(maStack&&macd1h.positive&&obvSlope<=0)preburst='LONG-BIAS PRE-BURST';
-  else if(!maStack&&!macd1h.positive&&obvSlope<0)preburst='SHORT ACTIVE';
-  else if(!maStack&&!macd1h.positive&&obvSlope>=0)preburst='SHORT-BIAS PRE-BURST';
+  if(maStack&&macd1h.positive&&realOBV.slope>5)preburst='LONG ACTIVE';
+  else if(maStack&&macd1h.positive&&realOBV.slope<=5)preburst='LONG-BIAS PRE-BURST';
+  else if(!maStack&&!macd1h.positive&&realOBV.slope<-5)preburst='SHORT ACTIVE';
+  else if(!maStack&&!macd1h.positive&&realOBV.slope>=-5)preburst='SHORT-BIAS PRE-BURST';
 
-  // Vol-Liq Trap Detector — ใช้ Real OBV Divergence
+  // Trap Detector
   const snapback=wickR>.45&&!maStack;
   const trapProb=Math.min(.99,(snapback?.45:0)+((volZ<.3)?.22:0)+(obvDivergence?.25:0)+(bScore<40?.12:0));
   const trapAlert=trapProb>=.90;
 
-  // FIX 1: Funding Rate จาก global state — ไม่อ่านจาก DOM
+  // FIX 1: ใช้ fundingRate จาก state variable (ไม่อ่าน DOM)
   let fundAdj=0;
-  if(!isNaN(fundingRate)){
-    if(fundingRate<-0.01)fundAdj=5;
-    else if(fundingRate>0.01)fundAdj=-5;
-  }
+  if(fundingRate<-0.01)fundAdj=5;
+  else if(fundingRate>0.01)fundAdj=-5;
 
-  // FIX 5: BTC Correlation Filter
-  let btcBullish=true,btcAdjL=0,btcAdjS=0;
+  // BTC Correlation Filter
+  let btcBullish=true,btcAdjL=0,btcAdjS=0,btcMacdPos=false;
   if(kd['btc']&&kd['btc'].length>10){
     const btcCls=kd['btc'].map(k=>parseFloat(k[4]));
     const btcMacd=calcMACD(btcCls);
     const btcEma20=calcEMA(btcCls,20);
-    const btcPrice=btcCls[btcCls.length-1];
-    btcBullish=btcMacd.positive&&btcPrice>btcEma20;
+    btcMacdPos=btcMacd.positive;
+    btcBullish=btcMacd.positive&&btcCls[btcCls.length-1]>btcEma20;
     if(!btcBullish){btcAdjL=-12;btcAdjS=8;}
     else{btcAdjL=8;btcAdjS=-8;}
   }
 
-  // FIX 6: RSI Adjustment
+  // RSI adj
   let rsiAdjL=0,rsiAdjS=0;
   if(rsiOversold){rsiAdjL=8;rsiAdjS=-5;}
   else if(rsiOverbought){rsiAdjL=-5;rsiAdjS=8;}
 
-  // FIX 3: Confidence Normalized — หาร maxPossible ก่อน scale
-  // Long max possible: 10+9+7+5+4+7+5+4+7+5+8+8 = 79 points + base 52
-  // Short max possible: 9+9+6+4+4+6+7+8+8 = 61 points + base 52
-  const L_MAX=52+79,S_MAX=52+61;
-  let lRaw=52,sRaw=52;
+  // FIX 3: Normalize Confidence
+  let lRaw=52;
   if(maStack)lRaw+=10;if(macd1h.positive)lRaw+=9;
   if(obvPos)lRaw+=7;if(realOBV4h.pos)lRaw+=5;
   if(volZ>.5)lRaw+=4;if(muSlopePos)lRaw+=7;
@@ -1012,17 +1038,16 @@ async function runEngine(kd){
   if(preburst.includes('LONG'))lRaw+=7;
   if(trapAlert)lRaw-=14;
   lRaw+=fundAdj+btcAdjL+rsiAdjL;
+  const lConf=normalizeConf(lRaw,LCONF_MAX,96);
 
+  let sRaw=52;
   if(!maStack)sRaw+=9;if(!macd1h.positive)sRaw+=9;
   if(!obvPos)sRaw+=6;if(!realOBV4h.pos)sRaw+=4;
   if(volZ<-.3)sRaw+=4;if(!muSlopePos)sRaw+=6;
   if(preburst.includes('SHORT'))sRaw+=7;
   if(trapAlert)sRaw-=9;
   sRaw-=fundAdj;sRaw+=btcAdjS+rsiAdjS;
-
-  // Normalize: scale lRaw → 50-96 range proportionally
-  const lConf=Math.min(96,Math.max(50,Math.round(50+(lRaw-52)/(L_MAX-52)*46)));
-  const sConf=Math.min(94,Math.max(50,Math.round(50+(sRaw-52)/(S_MAX-52)*44)));
+  const sConf=normalizeConf(sRaw,SCONF_MAX,94);
 
   C.sConf=sConf;C.lConf=lConf;
 
@@ -1051,12 +1076,13 @@ async function runEngine(kd){
     maStack,maStackBull,ema9,ema20,ema50,
     spikeProb,mlTrigger,bScore,statTrig,
     preburst,trapProb,trapAlert,
-    lConf,sConf,topConf,topDir,verdict,vClass,
-    entrySig,macdReady,obvReady,
-    btcBullish,fundAdj};
+    lConf,sConf,lRaw,sRaw,topConf,topDir,
+    verdict,vClass,entrySig,macdReady,obvReady,
+    btcBullish,btcMacdPos,fundAdj,fundingRate};
   updateMainUI(ad);updateTriggerUI(ad);
 }
 
+// ─── UPDATE MAIN UI ───
 function updateMainUI(d){
   el('sTP2').textContent='$'+fmt(C.sTP2);el('sTP1').textContent='$'+fmt(C.sTP1);
   el('sEntry').textContent='$'+fmt(C.shortLow)+'–'+fmt(C.shortHigh);el('sSL').textContent='$'+fmt(C.slShort);
@@ -1070,14 +1096,12 @@ function updateMainUI(d){
   el('brkScore').textContent=d.bScore.toFixed(0)+(d.statTrig?' ✅':' ❌');el('brkScore').style.color=d.statTrig?'var(--green)':'var(--red)';
   el('trapProb').textContent=d.trapProb.toFixed(2)+(d.trapAlert?' ⛔':' ✅');el('trapProb').style.color=d.trapAlert?'var(--red)':'var(--green)';
   el('atr14').textContent='$'+fmt(d.atrVal);
-  // FIX: New stat boxes
   const rsiEl=el('rsiVal');if(rsiEl){rsiEl.textContent=d.rsi.toFixed(1)+(d.rsiOversold?' 📉OS':d.rsiOverbought?' 📈OB':'');rsiEl.style.color=d.rsiOversold?'var(--green)':d.rsiOverbought?'var(--red)':'var(--muted)';}
   const btcEl=el('btcBias');if(btcEl){btcEl.textContent=d.btcBullish?'🟢 BULL':'🔴 BEAR';btcEl.style.color=d.btcBullish?'var(--green)':'var(--red)';}
   const robvEl=el('realOBVVal');if(robvEl){robvEl.textContent=d.realOBV.trend+' '+(d.realOBV.slope>0?'↑':'↓');robvEl.style.color=d.realOBV.pos?'var(--green)':'var(--red)';}
   const odivEl=el('obvDivVal');if(odivEl){odivEl.textContent=d.obvDivergence?'⚠️ DIV':'✅ OK';odivEl.style.color=d.obvDivergence?'var(--red)':'var(--green)';}
   el('sRR').textContent='1:'+(C.sTP1>0?((C.shortLow-C.sTP1)/(Math.abs(C.slShort-C.shortLow)||1)).toFixed(1):'—');
   el('lRR').textContent='1:'+(C.lTP1>0?((C.lTP1-C.longHigh)/(Math.abs(C.longHigh-C.slLong)||1)).toFixed(1):'—');
-  el('vDetail').textContent=`µ:$${fmt(C.muEntry)} σ:±$${fmt(d.sigma,0)} RSI:${d.rsi.toFixed(0)} OBV:${d.realOBV.trend} BTC:${d.btcBullish?'Bull':'Bear'}`;
   el('azp-short').textContent='$'+fmt(C.shortLow)+'–'+fmt(C.shortHigh);
   el('azp-long').textContent='$'+fmt(C.longLow)+'–'+fmt(C.longHigh);
   el('azp-sl').textContent='$'+fmt(C.slLong||C.lSL);
@@ -1085,48 +1109,47 @@ function updateMainUI(d){
   vb.className='verdict '+d.vClass;
   const vc={go:'var(--green)',cgo:'var(--yellow)',nogo:'var(--red)',hold:'var(--muted)'};
   vt.style.color=vc[d.vClass]||'var(--muted)';cv.style.color=vc[d.vClass]||'var(--muted)';
-  if(d.vClass==='go'){vt.textContent='✅ GO — '+d.topDir;vs.textContent='Confidence ≥ 90% — Phase Monitoring';cv.textContent=d.topConf+'%';gnl.textContent='Confirm → กด GO';el('btnGo').style.display='inline-block';el('btnNoGo').style.display='none';playAlert('go');sendNotif('✅ GO!',d.topDir+' Conf: '+d.topConf+'%');}
+  if(d.vClass==='go'){vt.textContent='✅ GO — '+d.topDir;vs.textContent='Confidence ≥ 90%';cv.textContent=d.topConf+'%';gnl.textContent='Confirm → กด GO';el('btnGo').style.display='inline-block';el('btnNoGo').style.display='none';playAlert('go');sendNotif('✅ GO!',d.topDir+' Conf: '+d.topConf+'%');}
   else if(d.vClass==='cgo'){vt.textContent='⚠️ CONDITIONAL GO — '+d.topDir;vs.textContent='Conf '+d.topConf+'% · '+d.entrySig;cv.textContent=d.topConf+'%';gnl.textContent='รอ OBV + Momentum';el('btnGo').style.display='inline-block';el('btnNoGo').style.display='inline-block';}
   else if(d.vClass==='nogo'){vt.textContent='❌ NOGO — TRAP';vs.textContent='TrapProb: '+d.trapProb.toFixed(2)+' ≥ 0.90';cv.textContent=d.topConf+'%';gnl.textContent='งดเทรด';el('btnGo').style.display='none';el('btnNoGo').style.display='inline-block';sendNotif('⛔ NOGO','Trap Detected!');}
   else{vt.textContent='⏳ SMART DELAY — HOLD';vs.textContent=d.entrySig;cv.textContent=d.topConf+'%';gnl.textContent='รอ Momentum Trigger';el('btnGo').style.display='none';el('btnNoGo').style.display='none';}
-  el('vDetail').textContent=`µ:$${fmt(C.muEntry)} σ:±$${fmt(d.sigma,0)} ATR:$${fmt(d.atrVal)} PreBurst:${d.preburst}`;
-}
+  el('vDetail').textContent=`µ:$${fmt(C.muEntry)} σ:±$${fmt(d.sigma,0)} RSI:${d.rsi.toFixed(0)} OBV:${d.realOBV.trend}(${d.realOBV.slope.toFixed(1)}%) BTC:${d.btcBullish?'Bull':'Bear'} FR:${d.fundingRate.toFixed(4)}%`;}
 
+// ─── UPDATE TRIGGER UI ───
 function updateTriggerUI(d){
-  setTV('tMacd',d.macd1h.positive?'BULL HIST ▲':'BEAR HIST ▼'+(d.macd1h.cross?' 🔀 CROSS!':''),d.macd1h.positive?'var(--green)':'var(--red)');
+  setTV('tMacd',d.macd1h.positive?'BULL HIST ▲':'BEAR HIST ▼'+(d.macd1h.cross?' 🔀CROSS!':''),d.macd1h.positive?'var(--green)':'var(--red)');
   setTV('tSlope',(d.maStackBull?'MA Stack BULL':'No Stack')+' µ:'+(d.muSlopePos?'↑':'↓'),d.muSlopePos?'var(--green)':'var(--red)');
-  // FIX: Real OBV display
-  setTV('tObv','Real OBV: '+d.realOBV.trend+' Slope:'+(d.realOBV.slope>0?'↑':'↓')+(d.obvDivergence?' ⚠️Div':''),d.obvPos?'var(--green)':'var(--red)');
+  setTV('tObv','Real OBV: '+d.realOBV.trend+' Slope:'+d.realOBV.slope.toFixed(1)+'%'+(d.obvDivergence?' ⚠️Div':''),d.obvPos?'var(--green)':'var(--red)');
   setTV('tTrap',d.trapAlert?'⛔ TRAP DETECTED':'✅ TrapProb '+d.trapProb.toFixed(2),d.trapAlert?'var(--red)':'var(--green)');
   setTV('tML','SpikeProb: '+d.spikeProb.toFixed(3)+(d.mlTrigger?' ✅':' ❌'),d.mlTrigger?'var(--green)':'var(--red)');
   setTV('tBrk','Score: '+d.bScore.toFixed(0)+(d.statTrig?' ✅':' ❌'),d.statTrig?'var(--green)':'var(--red)');
-  setTV('tBurst',d.preburst,d.preburst.includes('LONG')?'var(--green)':d.preburst.includes('SHORT')?'var(--red)':'var(--muted)');
+  setTV('tBurst',d.preburst,d.preburst.includes('LONG ACTIVE')?'var(--green)':d.preburst.includes('SHORT ACTIVE')?'var(--red)':d.preburst.includes('LONG')?'var(--yellow)':'var(--orange)');
   setTV('tVLT','TrapProb: '+d.trapProb.toFixed(2)+(d.trapAlert?' → NOGO':' → OK'),d.trapAlert?'var(--red)':'var(--green)');
-  // FIX: Funding rate + BTC shown in trigger
-  const fAdj=d.fundAdj>0?'+'+d.fundAdj:d.fundAdj<0?String(d.fundAdj):'0';
-  setTV('tFundAdj','Conf Adj: '+fAdj+'% | BTC: '+(d.btcBullish?'🟢 Bullish':'🔴 Bearish'),d.btcBullish?'var(--green)':'var(--red)');
-  setTV('sedMacd',d.macdReady?'✅ Ready'+(d.macd1h.cross?' 🔀 Cross!':''):'⏳ ยังไม่ Cross',d.macdReady?'var(--green)':'var(--yellow)');
-  setTV('sedObv',d.obvPos&&d.realOBV.slope>0?'✅ Ticking Up':'⏳ Flat/Down',d.obvPos&&d.realOBV.slope>0?'var(--green)':'var(--yellow)');
+  // FIX 1: แสดง Funding Rate จาก state variable
+  const frColor=d.fundingRate<-0.01?'var(--green)':d.fundingRate>0.01?'var(--red)':'var(--muted)';
+  setTV('tFund',(d.fundingRate>0?'+':'')+d.fundingRate.toFixed(4)+'% (Adj:'+(d.fundAdj>0?'+':'')+d.fundAdj+'%)',frColor);
+  setTV('tFundAdj','Conf Adj: '+(d.fundAdj>0?'+':'')+d.fundAdj+'% | BTC MACD: '+(d.btcMacdPos?'🟢 Bull':'🔴 Bear'),d.btcBullish?'var(--green)':'var(--red)');
+  setTV('sedMacd',d.macdReady?'✅ Ready'+(d.macd1h.cross?' 🔀':''):'⏳ ยังไม่ Cross',d.macdReady?'var(--green)':'var(--yellow)');
+  setTV('sedObv',d.obvPos&&d.realOBV.slope>0?'✅ Slope+('+d.realOBV.slope.toFixed(1)+'%)':'⏳ Slope-',d.obvPos&&d.realOBV.slope>0?'var(--green)':'var(--yellow)');
   setTV('sedMom',d.maStack?'✅ Active':'⏳ Weak',d.maStack?'var(--green)':'var(--yellow)');
-  const se=el('sedSig');se.textContent=d.entrySig;se.style.color=d.entrySig==='GO'?'var(--green)':d.entrySig.includes('HOLD')||d.entrySig.includes('SOFT')?'var(--yellow)':'var(--red)';
-  const sv=el('sedVerdict');sv.textContent=d.entrySig==='GO'?'✅ MOMENTUM CONFIRMED':'⏳ '+d.entrySig;sv.style.borderColor=d.entrySig==='GO'?'var(--green)':'var(--muted)';sv.style.color=d.entrySig==='GO'?'var(--green)':'var(--muted)';
-  setTV('mlVol','Δ Z: '+d.volZ.toFixed(2),Math.abs(d.volZ)>.5?'var(--yellow)':'var(--muted)');
-  // FIX: Real OBV in ML module
-  setTV('mlOBV','Real OBV: '+d.realOBV.trend+' (slope:'+(d.realOBV.slope>0?'+':'')+d.realOBV.slope.toFixed(2)+')',d.realOBV.pos?'var(--green)':'var(--red)');
+  const se=el('sedSig');if(se){se.textContent=d.entrySig;se.style.color=d.entrySig==='GO'?'var(--green)':d.entrySig.includes('HOLD')||d.entrySig.includes('SOFT')?'var(--yellow)':'var(--red)';}
+  const sv=el('sedVerdict');if(sv){sv.textContent=d.entrySig==='GO'?'✅ MOMENTUM CONFIRMED':'⏳ '+d.entrySig;sv.style.borderColor=d.entrySig==='GO'?'var(--green)':'var(--muted)';sv.style.color=d.entrySig==='GO'?'var(--green)':'var(--muted)';}
+  setTV('mlVol','Vol Z: '+d.volZ.toFixed(2),Math.abs(d.volZ)>.5?'var(--yellow)':'var(--muted)');
+  setTV('mlOBV','Real OBV: '+d.realOBV.trend+' ('+d.realOBV.slope.toFixed(1)+'%)',d.realOBV.pos?'var(--green)':'var(--red)');
   setTV('mlSlope',d.muSlopePos?'Positive ↑':'Negative ↓',d.muSlopePos?'var(--green)':'var(--red)');
   el('mlProbVal').textContent=d.spikeProb.toFixed(3);el('mlProbBar').style.width=(d.spikeProb*100)+'%';el('mlProbBar').style.background=d.mlTrigger?'var(--green)':'var(--orange)';
-  el('mlResult').textContent='MLSpikeTrigger: '+(d.mlTrigger?'✅ TRUE':'❌ FALSE')+' | RSI: '+d.rsi.toFixed(1)+(d.rsiOversold?' 📉OS':d.rsiOverbought?' 📈OB':'');
-  el('mlResult').style.color=d.mlTrigger?'var(--green)':'var(--red)';
+  el('mlResult').textContent='MLSpikeTrigger: '+(d.mlTrigger?'✅ TRUE':'❌ FALSE')+' | RSI:'+d.rsi.toFixed(1)+(d.rsiOversold?' 📉OS':d.rsiOverbought?' 📈OB':'');el('mlResult').style.color=d.mlTrigger?'var(--green)':'var(--red)';
   setTV('brMu',fmt(Math.abs(d.price-C.muEntry),0)+' / '+(Math.abs(d.price-C.muEntry)/C.muEntry*100).toFixed(2)+'%');
-  // FIX: Real OBV Divergence in Breakout
-  setTV('brOBV',d.obvDivergence?'⚠️ DIVERGING (Bearish)':'✅ Aligned',d.obvDivergence?'var(--red)':'var(--green)');
+  setTV('brOBV',d.obvDivergence?'⚠️ DIVERGING (15-candle)':'✅ Aligned',d.obvDivergence?'var(--red)':'var(--green)');
   setTV('brVZ',d.volZ.toFixed(2),Math.abs(d.volZ)>1?'var(--orange)':'var(--muted)');
   el('brScoreVal').textContent=d.bScore.toFixed(0)+'/100';el('brScoreBar').style.width=d.bScore+'%';el('brScoreBar').style.background=d.statTrig?'var(--green)':'var(--cyan)';
   el('brResult').textContent='StatBreakoutTrigger: '+(d.statTrig?'✅ TRUE':'❌ FALSE');el('brResult').style.color=d.statTrig?'var(--green)':'var(--red)';
+  // FIX 3: แสดง Normalized Confidence raw scores
+  const confDebug=el('confDebug');if(confDebug)confDebug.textContent=`L raw:${d.lRaw}/${LCONF_MAX}=${d.lConf}% | S raw:${d.sRaw}/${SCONF_MAX}=${d.sConf}%`;
 }
 
 // Go/NoGo
-function confirmGo(){addLog('✅ GO CONFIRMED — Phase Monitoring','var(--green)','var(--green)');sendNotif('✅ GO CONFIRMED','Phase Monitoring Active');showAlert('long','✅','GO CONFIRMED',curPrice,'Phase Monitoring เริ่มแล้ว','var(--green)',[{lbl:'📊 Dashboard',cls:'var(--green)',fn:'closeAlert()'}]);el('btnGo').style.display='none';}
+function confirmGo(){addLog('✅ GO CONFIRMED — Phase Monitoring','var(--green)','var(--green)');sendNotif('✅ GO CONFIRMED','Active');showAlert('long','✅','GO CONFIRMED',curPrice,'Phase Monitoring เริ่มแล้ว','var(--green)',[{lbl:'📊 Dashboard',cls:'var(--green)',fn:'closeAlert()'}]);el('btnGo').style.display='none';}
 function confirmNoGo(){addLog('❌ NOGO','var(--red)','var(--red)');el('btnGo').style.display='none';el('btnNoGo').style.display='none';}
 
 // Main update
@@ -1140,12 +1163,10 @@ async function update(){
   el('h24').textContent='$'+fmt(parseFloat(tick.highPrice));el('l24').textContent='$'+fmt(parseFloat(tick.lowPrice));
   el('lastRef').innerHTML='🇹🇭 '+thaiTime()+' <span class="blink">_</span>';
   if(fund){
-    // FIX 1: fundingRate ถูก set แล้วใน fetchFunding() → แค่ update UI
-    const fr=fundingRate.toFixed(4);
-    const fe=el('fundEl');fe.textContent=(fundingRate>0?'+':'')+fr+'%';
-    fe.style.color=fundingRate>0?'var(--red)':'var(--green)';
+    // FIX 1: อัปเดต global fundingRate ใน fetchFunding แล้ว แค่ update display
+    const frColor=fundingRate<-0.01?'var(--green)':fundingRate>0.01?'var(--red)':'var(--muted)';
+    const fe=el('fundEl');if(fe){fe.textContent=(fundingRate>0?'+':'')+fundingRate.toFixed(4)+'%';fe.style.color=frColor;}
     el('markEl').textContent='$'+fmt(parseFloat(fund.markPrice));
-    setTV('tFund',(fundingRate>0?'+':'')+fr+'% '+(fundingRate<-0.01?'(Long+)':fundingRate>0.01?'(Short+)':''),fundingRate<-0.01?'var(--green)':fundingRate>0.01?'var(--red)':'var(--muted)');
   }
   updateNeedles(price);updateAlerts(price);checkAlerts(price);
   priceHist.push(price);if(priceHist.length>120)priceHist.shift();
@@ -1161,57 +1182,44 @@ async function reanalyze(){
   el('btnGo').style.display='none';el('btnNoGo').style.display='none';
   const steps=[
     {t:'เชื่อมต่อ Binance Futures API...',p:8},
-    {t:'ดึงข้อมูล ETH 1H/4H/1D...',p:20},
-    {t:'ดึงข้อมูล BTC Correlation...',p:32},
-    {t:'คำนวณ Real OBV Cumulative...',p:44},
-    {t:'คำนวณ RSI + MACD Cross...',p:54},
-    {t:'ML Spike Detector (v2)...',p:64},
-    {t:'Breakout Ranker + Trap...',p:72},
-    {t:'BTC Correlation Filter...',p:80},
-    {t:'Funding Rate → Confidence...',p:86},
-    {t:'Rolling 7D Backtest...',p:92},
-    {t:'Fear & Greed Index...',p:96},
-    {t:'✅ Baseline v5.1 Ready',p:100}];
-  for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,350));}
-
-  // Fetch all data in parallel
-  const [k1h,k4h,k1d,kBTC,fg]=await Promise.all([
-    fetchKlines('1h',120),
-    fetchKlines('4h',80),
-    fetchKlines('1d',40),
-    fetchBTCKlines('1h',60),
-    fetchFearGreed(),
-  ]);
-
-  // Rolling 7D Backtest — คำนวณจริง
-  const bt=await calcRollingHitRatio('1h');
-
-  // Update Fear & Greed display
+    {t:'ดึง ETH 1H/4H/1D (120 แท่ง)...',p:18},
+    {t:'ดึง BTC Correlation 1H...',p:28},
+    {t:'Fear & Greed (6H cache)...',p:36},
+    {t:'Real OBV Cumulative (FIX 4/7)...',p:46},
+    {t:'RSI 14 Wilder (warm-up FIX 8)...',p:54},
+    {t:'ML Spike v2 (proportional FIX 5)...',p:62},
+    {t:'Breakout + Trap Detector...',p:70},
+    {t:'BTC Correlation Filter...',p:78},
+    {t:'Funding Rate State (FIX 1)...',p:84},
+    {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
+    {t:'Confidence Normalize (FIX 3)...',p:95},
+    {t:'✅ Baseline v5.2 Ready',p:100}];
+  for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
+  const [k1h,k4h,k1d,kBTC,fg,bt]=await Promise.all([
+    fetchKlines('1h',120),fetchKlines('4h',80),fetchKlines('1d',40),
+    fetchBTCKlines('1h',60),fetchFearGreed(),calcRollingHitRatio('1h')]);
+  // Update F&G display
   const fgColor=fg<=25?'var(--red)':fg<=45?'var(--orange)':fg<=55?'var(--yellow)':'var(--green)';
   const fgLabel=fg<=25?'😱 Extreme Fear':fg<=45?'😨 Fear':fg<=55?'😐 Neutral':fg<=75?'😊 Greed':'🤑 Extreme Greed';
-  setTV('tFG',fg+' — '+fgLabel,fgColor);
-
-  // FIX 2: Rolling Backtest แสดง Long + Short แยกกัน
+  setTV('tFG',fg+' — '+fgLabel+(fgCache.ts>0?' (cache)':''),fgColor);
+  // FIX 2: แสดง Both-side Backtest
   const btEl=el('btScoreEl');
-  if(btEl)btEl.textContent=`Long:${Math.round(bt.long*100)}% Short:${Math.round(bt.short*100)}% Avg:${Math.round(bt.ratio*100)}% (Score ${bt.score})`;
-
+  if(btEl)btEl.textContent=`1H Long:${(bt.ratioL*100).toFixed(0)}% Short:${(bt.ratioS*100).toFixed(0)}% Score:${bt.score}/100`;
   await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
   await update();ov.classList.remove('show');
-  addLog('🔄 Baseline v5.2 — OBV15 + RSI30 + Normalized Conf + F&G:'+fg,'var(--cyan)','var(--cyan)');
-  sendNotif('ETH Cone v5.2 🔄','วิเคราะห์ใหม่เสร็จ · F&G:'+fg+' · $'+fmt(curPrice));
-}
+  addLog(`🔄 v5.2 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+  sendNotif('ETH Cone v5.2 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));}
 
 // Multi-TF
 async function fetchAllTF(){
   const tfs=[{iv:'1m',l:'1m'},{iv:'5m',l:'5m'},{iv:'15m',l:'15m'},{iv:'1h',l:'1H'},{iv:'4h',l:'4H'},{iv:'1d',l:'1D'}];
   const rows=[];
   for(const {iv,l} of tfs){
-    try{const k=await fetchKlines(iv,60);const cls=k.map(c=>parseFloat(c[4]));const vols=k.map(c=>parseFloat(c[5]));const last=cls[cls.length-1];const ema20=calcEMA(cls,20);const macd=calcMACD(cls);const atr=calcATR(k,14);const vr=(vols[vols.length-1]/(vols.slice(-20).reduce((a,b)=>a+b,0)/20)).toFixed(2);const trend=last>ema20?'↑ EMA20':'↓ EMA20';const bias=(last>ema20&&macd.positive)?'BULL':(last<ema20&&!macd.positive)?'BEAR':'NEUT';rows.push({l,last,ema20,mh:macd.last,atr,vr,trend,bias});}
-    catch{rows.push({l,last:0,ema20:0,mh:0,atr:0,vr:'—',trend:'—',bias:'ERR'});}
+    try{const k=await fetchKlines(iv,60);const cls=k.map(c=>parseFloat(c[4]));const vols=k.map(c=>parseFloat(c[5]));const last=cls[cls.length-1];const ema20=calcEMA(cls,20);const macd=calcMACD(cls);const atr=calcATR(k,14);const rsi=calcRSI(cls,14);const vr=(vols[vols.length-1]/(vols.slice(-20).reduce((a,b)=>a+b,0)/20)).toFixed(2);const trend=last>ema20?'↑ EMA20':'↓ EMA20';const bias=(last>ema20&&macd.positive)?'BULL':(last<ema20&&!macd.positive)?'BEAR':'NEUT';rows.push({l,last,ema20,mh:macd.last,atr,vr,trend,bias,rsi});}
+    catch{rows.push({l,last:0,ema20:0,mh:0,atr:0,vr:'—',trend:'—',bias:'ERR',rsi:50});}
   }
   const tb=el('tfBody');
-  tb.innerHTML=rows.map(r=>{const bc=r.bias==='BULL'?'bbull':r.bias==='BEAR'?'bbear':'bneut';const mc=r.mh>0?'color:var(--green)':'color:var(--red)';const best=r.l==='1H';return`<tr ${best?'class="brow"':''}><td style="color:${best?'var(--yellow)':'var(--muted)'};">${best?'⭐ ':''}${r.l}</td><td style="color:var(--cyan);">$${fmt(r.last)}</td><td>$${fmt(r.ema20)}</td><td style="${mc}">${r.mh>0?'+':''}${fmt(r.mh,2)}</td><td>$${fmt(r.atr)}</td><td style="color:${parseFloat(r.vr)>1.5?'var(--yellow)':'var(--muted)'};">${r.vr}x</td><td style="font-size:9px;color:var(--muted);">${r.trend}</td><td><span class="bdg ${bc}">${r.bias}</span></td></tr>`;}).join('');
-}
+  tb.innerHTML=rows.map(r=>{const bc=r.bias==='BULL'?'bbull':r.bias==='BEAR'?'bbear':'bneut';const mc=r.mh>0?'color:var(--green)':'color:var(--red)';const best=r.l==='1H';const rc=r.rsi<35?'var(--green)':r.rsi>65?'var(--red)':'var(--muted)';return`<tr ${best?'class="brow"':''}><td style="color:${best?'var(--yellow)':'var(--muted)'};">${best?'⭐ ':''}${r.l}</td><td style="color:var(--cyan);">$${fmt(r.last)}</td><td>$${fmt(r.ema20)}</td><td style="${mc}">${r.mh>0?'+':''}${fmt(r.mh,2)}</td><td>$${fmt(r.atr)}</td><td style="color:${parseFloat(r.vr)>1.5?'var(--yellow)':'var(--muted)'};">${r.vr}x</td><td style="color:${rc};font-size:9px;">${r.rsi.toFixed(0)}</td><td><span class="bdg ${bc}">${r.bias}</span></td></tr>`;}).join('');}
 
 // Sparkline
 function drawSpark(aid,lid,data){
@@ -1223,8 +1231,7 @@ function drawSpark(aid,lid,data){
 
 // Needles
 function updateNeedles(price){
-  if(!C.shortLow)return;
-  const rng=C.slShort-C.slLong||1;
+  if(!C.shortLow)return;const rng=C.slShort-C.slLong||1;
   const pct=Math.max(2,Math.min(98,((price-C.slLong)/rng*100)));
   el('sNeedle').style.left=pct.toFixed(1)+'%';el('sNTag').textContent='▼ $'+fmt(price);
   el('lNeedle').style.left=pct.toFixed(1)+'%';el('lNTag').textContent='▼ $'+fmt(price);}
@@ -1233,50 +1240,31 @@ function updateNeedles(price){
 function updateAlerts(p){
   if(!C.shortLow)return;
   const dS=C.shortLow-p,inS=p>=C.shortLow&&p<=C.shortHigh;
-  el('azd-short').textContent=inS?'✅ อยู่ใน Zone!':`ห่าง +$${fmt(Math.max(0,dS),0)} ▲`;
-  el('azd-short').style.color=inS?'var(--red)':'var(--muted)';
-  el('azf-short').style.width=Math.max(0,Math.min(100,(1-dS/200)*100))+'%';
-  setAzSt('azs-short',inS?'HIT':'WATCH');
+  el('azd-short').textContent=inS?'✅ อยู่ใน Zone!':`ห่าง +$${fmt(Math.max(0,dS),0)} ▲`;el('azd-short').style.color=inS?'var(--red)':'var(--muted)';
+  el('azf-short').style.width=Math.max(0,Math.min(100,(1-dS/200)*100))+'%';setAzSt('azs-short',inS?'HIT':'WATCH');
   const dL=p-C.longHigh,inL=p>=C.longLow&&p<=C.longHigh;
-  el('azd-long').textContent=inL?'✅ อยู่ใน Zone!':`ห่าง -$${fmt(Math.max(0,dL),0)} ▼`;
-  el('azd-long').style.color=inL?'var(--green)':'var(--muted)';
-  el('azf-long').style.width=Math.max(0,Math.min(100,(1-dL/200)*100))+'%';
-  setAzSt('azs-long',inL?'HIT':'WATCH');
+  el('azd-long').textContent=inL?'✅ อยู่ใน Zone!':`ห่าง -$${fmt(Math.max(0,dL),0)} ▼`;el('azd-long').style.color=inL?'var(--green)':'var(--muted)';
+  el('azf-long').style.width=Math.max(0,Math.min(100,(1-dL/200)*100))+'%';setAzSt('azs-long',inL?'HIT':'WATCH');
+  // FIX 6: แสดง Whale Liq dynamic
   const dW=Math.abs(p-C.whaleLiq),nW=dW<25;
-  el('azd-whale').textContent=`ห่าง $${fmt(dW,0)}`;el('azd-whale').style.color=nW?'var(--orange)':'var(--muted)';
+  el('azd-whale').textContent=`ห่าง $${fmt(dW,0)} (Liq Est. $${fmt(C.whaleLiq)})`;el('azd-whale').style.color=nW?'var(--orange)':'var(--muted)';
   el('azf-whale').style.width=Math.max(0,Math.min(100,(1-dW/200)*100))+'%';setAzSt('azs-whale',nW?'NEAR':'WATCH');
   const dSL=p-(C.slLong||2200),nSL=dSL<40;
   el('azd-sl').textContent=`ห่าง $${fmt(dSL,0)}`;el('azf-sl').style.width=Math.max(0,Math.min(100,(1-dSL/200)*100))+'%';setAzSt('azs-sl',nSL?'NEAR':'WATCH');}
-
 function setAzSt(id,type){const e=el(id);if(!e)return;if(type==='HIT'){e.textContent='🚨 HIT!';e.className='azst sth';}else if(type==='NEAR'){e.textContent='⚡ NEAR';e.className='azst str';}else{e.textContent='👁 WATCH';e.className='azst stw';}}
-
 function checkAlerts(p){
   if(!C.shortLow)return;
-  if(p>=C.shortLow&&p<=C.shortHigh&&!alTrig.short){alTrig.short=true;playAlert('short');addLog('🔴 SHORT ZONE — $'+fmt(p),'var(--red)','var(--red)');sendNotif('🔴 SHORT ZONE!','ราคา $'+fmt(p));el('az-short').classList.add('hit');setTimeout(()=>el('az-short').classList.remove('hit'),5000);showAlert('short','🔴','SHORT ZONE!',p,'ราคาเข้า Short Entry Zone\nรอ Rejection + OBV Confirm','var(--red)',[{lbl:'⚔️ รับทราบ',cls:'var(--red)',fn:'closeAlert()'}]);}
+  if(p>=C.shortLow&&p<=C.shortHigh&&!alTrig.short){alTrig.short=true;playAlert('short');addLog('🔴 SHORT ZONE — $'+fmt(p),'var(--red)','var(--red)');sendNotif('🔴 SHORT!','$'+fmt(p));el('az-short').classList.add('hit');setTimeout(()=>el('az-short').classList.remove('hit'),5000);showAlert('short','🔴','SHORT ZONE!',p,'ราคาเข้า Short Entry Zone','var(--red)',[{lbl:'⚔️ รับทราบ',cls:'var(--red)',fn:'closeAlert()'}]);}
   if(p<C.shortLow-15)alTrig.short=false;
-  if(p>=C.longLow&&p<=C.longHigh&&!alTrig.long){alTrig.long=true;playAlert('long');addLog('🟢 LONG ZONE — $'+fmt(p),'var(--green)','var(--green)');sendNotif('🟢 LONG ZONE!','ราคา $'+fmt(p));el('az-long').classList.add('hit');setTimeout(()=>el('az-long').classList.remove('hit'),5000);showAlert('long','🟢','LONG ZONE!',p,'ราคาเข้า Long Entry Zone\nรอ OBV Tick + MACD Hold','var(--green)',[{lbl:'🚀 รับทราบ',cls:'var(--green)',fn:'closeAlert()'}]);}
+  if(p>=C.longLow&&p<=C.longHigh&&!alTrig.long){alTrig.long=true;playAlert('long');addLog('🟢 LONG ZONE — $'+fmt(p),'var(--green)','var(--green)');sendNotif('🟢 LONG!','$'+fmt(p));el('az-long').classList.add('hit');setTimeout(()=>el('az-long').classList.remove('hit'),5000);showAlert('long','🟢','LONG ZONE!',p,'ราคาเข้า Long Entry Zone','var(--green)',[{lbl:'🚀 รับทราบ',cls:'var(--green)',fn:'closeAlert()'}]);}
   if(p>C.longHigh+15)alTrig.long=false;
-  if(Math.abs(p-C.whaleLiq)<20&&!alTrig.whale){alTrig.whale=true;playAlert('danger');addLog('⚠️ WHALE LIQ $2,288 — Cascade Risk!','var(--orange)','var(--orange)');sendNotif('⚠️ WHALE LIQ!','ราคาใกล้ $2,288');}
+  if(Math.abs(p-C.whaleLiq)<20&&!alTrig.whale){alTrig.whale=true;playAlert('danger');addLog('⚠️ WHALE LIQ $'+fmt(C.whaleLiq)+' — Cascade Risk!','var(--orange)','var(--orange)');sendNotif('⚠️ WHALE LIQ!','ราคาใกล้ $'+fmt(C.whaleLiq));}
   if(Math.abs(p-C.whaleLiq)>60)alTrig.whale=false;}
 
 // Duration
-function setDur(secs){
-  el('customWrap').style.display='none';
-  document.querySelectorAll('.durbtn').forEach(b=>b.classList.remove('sel'));
-  const m={300:'dur-300',900:'dur-900',1800:'dur-1800',3600:'dur-3600',7200:'dur-7200',14400:'dur-14400',28800:'dur-28800'};
-  if(m[secs])el(m[secs]).classList.add('sel');
-  customDurSecs=secs;el('durDisplay').textContent=fmtDur(secs);}
-function showCustomDur(){
-  document.querySelectorAll('.durbtn').forEach(b=>b.classList.remove('sel'));
-  el('dur-custom').classList.add('sel');el('customWrap').style.display='block';}
-function applyCustomDur(){
-  const h=parseInt(el('inH').value)||0,m=parseInt(el('inM').value)||0,s=parseInt(el('inS').value)||0;
-  const total=h*3600+m*60+s;
-  if(total<10){alert('ขั้นต่ำ 10 วินาที');return;}
-  customDurSecs=total;el('durDisplay').textContent=fmtDur(total);
-  el('customWrap').style.display='none';el('dur-custom').textContent='✓ '+fmtDur(total);}
-
-// TF / Dir / Size
+function setDur(secs){el('customWrap').style.display='none';document.querySelectorAll('.durbtn').forEach(b=>b.classList.remove('sel'));const m={300:'dur-300',900:'dur-900',1800:'dur-1800',3600:'dur-3600',7200:'dur-7200',14400:'dur-14400',28800:'dur-28800'};if(m[secs])el(m[secs]).classList.add('sel');customDurSecs=secs;el('durDisplay').textContent=fmtDur(secs);}
+function showCustomDur(){document.querySelectorAll('.durbtn').forEach(b=>b.classList.remove('sel'));el('dur-custom').classList.add('sel');el('customWrap').style.display='block';}
+function applyCustomDur(){const h=parseInt(el('inH').value)||0,m=parseInt(el('inM').value)||0,s=parseInt(el('inS').value)||0;const total=h*3600+m*60+s;if(total<10){alert('ขั้นต่ำ 10 วินาที');return;}customDurSecs=total;el('durDisplay').textContent=fmtDur(total);el('customWrap').style.display='none';el('dur-custom').textContent='✓ '+fmtDur(total);}
 function selTF(tf){document.querySelectorAll('.tfbtn').forEach(b=>b.classList.remove('sel'));el('tf-'+tf).classList.add('sel');tradeTF=tf;}
 function setDir(d){tradeDir=d;el('dirLong').classList.toggle('on',d==='long');el('dirShort').classList.toggle('on',d==='short');}
 function setSize(s){tradeSize=s;['sz100','sz500','sz1000'].forEach(id=>el(id).classList.remove('on'));const m={100:'sz100',500:'sz500',1000:'sz1000'};if(m[s])el(m[s]).classList.add('on');}
@@ -1299,15 +1287,12 @@ async function startTrade(){
   clearInterval(tradeTimerInt);tradeTimerInt=setInterval(tickTimer,500);
   reqWakeLock();
   addLog(`🚀 ${tradeDir.toUpperCase()} TF:${TF_LBL[tradeTF]} $${tradeSize} Entry:$${fmt(price)} Dur:${fmtDur(customDurSecs)}`,'var(--cyan)','var(--cyan)');
-  sendNotif('🚀 Trade Started',`${tradeDir.toUpperCase()} $${fmt(price)} | ${fmtDur(customDurSecs)}`);}
+  sendNotif('🚀 Trade',tradeDir.toUpperCase()+' $'+fmt(price)+' | '+fmtDur(customDurSecs));}
 
-// ════════════════════════════════════
-// TIMESTAMP-BASED TIMER — ถูกต้องแม้ Tab ไม่ active
-// ════════════════════════════════════
+// Timestamp-based timer
 function tickTimer(){
   if(tradeFinished)return;
-  const now=Date.now();
-  const remaining=Math.max(0,Math.floor((tradeEndTime-now)/1000));
+  const remaining=Math.max(0,Math.floor((tradeEndTime-Date.now())/1000));
   const pct=remaining/customDurSecs;const circ=314;
   el('ringFill').style.strokeDashoffset=(circ*(1-pct)).toFixed(2);
   el('ringFill').style.stroke=pct>.5?'url(#rg)':pct>.25?'var(--yellow)':'var(--red)';
@@ -1316,13 +1301,13 @@ function tickTimer(){
   el('tradePhase').textContent=pct>.66?'MONITORING':pct>.33?'MID SESSION':remaining>0?'🔥 FINAL':'DONE';
   if(remaining<=0)triggerResult('TIMEOUT');}
 
-// Page Visibility — sync timer when tab returns
+// Page Visibility
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)return;
   if(!tradeActive||tradeFinished)return;
   const remaining=Math.max(0,Math.floor((tradeEndTime-Date.now())/1000));
   if(remaining<=0){triggerResult('TIMEOUT');sendNotif('⏰ Trade หมดเวลา!','กลับมาดูผลได้เลย');}
-  else{tickTimer();addLog(`👁️ Tab กลับมา — เหลือ ${fmtDur(remaining)}`,'var(--yellow)','var(--yellow)');reqWakeLock();}});
+  else{tickTimer();addLog(`👁 Tab กลับมา — เหลือ ${fmtDur(remaining)}`,'var(--yellow)');reqWakeLock();}});
 
 // Trade PnL
 function updateTrade(price){
@@ -1347,9 +1332,7 @@ function updateTrade(price){
     if(price<=tradeTP1&&!tp1Hit){tp1Hit=true;addLog('🎯 TP1 Hit!','var(--yellow)','var(--yellow)');}
     if(price>=tradeSL){triggerResult('SL');return;}
   }}
-
 function cancelTrade(){if(tradeActive){relWakeLock();triggerResult('MANUAL');}}
-
 function triggerResult(type){
   if(tradeFinished)return;tradeFinished=true;tradeActive=false;
   clearInterval(tradeTimerInt);relWakeLock();
@@ -1368,7 +1351,6 @@ function triggerResult(type){
   window._pt={date:thaiDT(),tf:TF_LBL[tradeTF],dir:tradeDir,entry:tradeEntry,exit:price,tp1:tradeTP1,tp2:tradeTP2,sl:tradeSL,pnl,pct,type,dur:durStr,maxP:tradeMaxP,maxL:tradeMaxL,sHigh:tradeSHigh,sLow:tradeSLow,tp1Hit,note:''};
   showAlert(cls[type],icons[type],type+' RESULT',price,'',colors[type],[{lbl:'💾 บันทึก + ใหม่',cls:colors[type],fn:'saveNew()'},{lbl:'📊 Analytics',cls:'var(--muted)',fn:"sw('analytics');closeAlert();"}],sumHTML,true);
   addLog(`${icons[type]} ${type} · ${tradeDir.toUpperCase()} · PnL:${pnl>=0?'+$':'-$'}${fmt(Math.abs(pnl))}`,isWin?'var(--green)':type==='SL'?'var(--red)':'var(--yellow)');}
-
 function saveNew(){
   if(window._pt){window._pt.note=el('noteInput').value;const l=loadLog();l.unshift(window._pt);saveLog(l);addLog('💾 บันทึกแล้ว','var(--green)','var(--green)');}
   closeAlert();el('tradePanel').style.display='none';el('tradeSetup').style.display='block';
@@ -1385,36 +1367,30 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5 ⚡','ทดสอบ — ระบบพร้อม!');showAlert('info','⚡','TEST',curPrice||2311,'ระบบพร้อม — Baseline Active','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.2 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.2',curPrice||2311,'Baseline v5.2 Active\n10 Fixes Applied','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export
 function exportCSV(){
-  const log=loadLog();
-  if(!log.length){addLog('ไม่มีข้อมูลสำหรับ Export','var(--yellow)');return;}
+  const log=loadLog();if(!log.length){addLog('ไม่มีข้อมูลสำหรับ Export','var(--yellow)');return;}
   const header='#,วันที่,TF,Direction,Entry,Exit,PnL,PnL%,ExitType,Duration,MaxProfit,MaxLoss,TP1Hit,Note';
-  const rows=log.map((t,i)=>[
-    log.length-i,
-    (t.date||'').replace(/,/g,' '),
-    t.tf||'',t.dir||'',
-    fmt(t.entry),fmt(t.exit),
-    fmt(t.pnl),fmt(t.pct)+'%',
-    t.type||'',t.dur||'',
-    fmt(t.maxP||0),fmt(t.maxL||0),
-    t.tp1Hit?'YES':'NO',
-    (t.note||'').replace(/,/g,' ')
-  ].join(','));
+  const rows=log.map((t,i)=>[log.length-i,(t.date||'').replace(/,/g,' '),t.tf||'',t.dir||'',fmt(t.entry),fmt(t.exit),fmt(t.pnl),fmt(t.pct)+'%',t.type||'',t.dur||'',fmt(t.maxP||0),fmt(t.maxL||0),t.tp1Hit?'YES':'NO',(t.note||'').replace(/,/g,' ')].join(','));
   const csv=[header,...rows].join('\n');
   const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');
   a.href=url;a.download='ETH_Cone_v52_'+new Date().toLocaleDateString('th-TH').replace(/\//g,'-')+'.csv';
   a.click();URL.revokeObjectURL(url);
-  addLog('📥 Export CSV สำเร็จ — '+log.length+' รอบ','var(--green)','var(--green)');
-}
+  addLog('📥 Export CSV — '+log.length+' รอบ','var(--green)','var(--green)');}
+
+// History
+function renderHistory(){
   const log=loadLog(),tb=el('histBody');
   if(!log.length){tb.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:16px;">ยังไม่มีประวัติ</td></tr>';return;}
-  tb.innerHTML=log.map((t,i)=>{const wc=t.pnl>=0?'var(--green)':'var(--red)';const bc=t.type==='TP1'||t.type==='TP2'?'bbull':t.type==='SL'?'bbear':'bneut';return`<tr><td style="color:var(--muted);">${log.length-i}</td><td style="font-size:8px;color:var(--muted);">${(t.date||'').substring(0,10)}</td><td style="color:var(--cyan);">${t.tf||'—'}</td><td style="color:${t.dir==='long'?'var(--green)':'var(--red)'};">${(t.dir||'').toUpperCase()}</td><td>$${fmt(t.entry)}</td><td>$${fmt(t.exit)}</td><td style="color:${wc};">${t.pnl>=0?'+$':'-$'}${fmt(Math.abs(t.pnl))}</td><td style="color:${wc};">${(t.pct>=0?'+':'')+fmt(t.pct)}%</td><td><span class="bdg ${bc}">${t.type||'—'}</span></td><td style="color:var(--muted);font-size:9px;">${t.dur||'—'}</td><td style="color:var(--muted);font-size:9px;max-width:80px;word-break:break-word;">${t.note||'—'}</td></tr>`;}).join('');}
+  tb.innerHTML=log.map((t,i)=>{
+    const wc=t.pnl>=0?'var(--green)':'var(--red)';
+    const bc=t.type==='TP1'||t.type==='TP2'?'bbull':t.type==='SL'?'bbear':'bneut';
+    return`<tr><td style="color:var(--muted);">${log.length-i}</td><td style="font-size:8px;color:var(--muted);">${(t.date||'').substring(0,10)}</td><td style="color:var(--cyan);">${t.tf||'—'}</td><td style="color:${t.dir==='long'?'var(--green)':'var(--red)'};">${(t.dir||'').toUpperCase()}</td><td>$${fmt(t.entry)}</td><td>$${fmt(t.exit)}</td><td style="color:${wc};">${t.pnl>=0?'+$':'-$'}${fmt(Math.abs(t.pnl))}</td><td style="color:${wc};">${(t.pct>=0?'+':'')+fmt(t.pct)}%</td><td><span class="bdg ${bc}">${t.type||'—'}</span></td><td style="color:var(--muted);font-size:9px;">${t.dur||'—'}</td><td style="color:var(--muted);font-size:9px;max-width:80px;word-break:break-word;">${t.note||'—'}</td></tr>`;
+  }).join('');}
 function clearHistory(){if(confirm('ลบประวัติทั้งหมด?')){saveLog([]);renderHistory();renderAnalytics();}}
 
 // Analytics
