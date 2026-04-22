@@ -93,6 +93,8 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 .clbar{flex:1;height:20px;background:var(--dim);border-radius:2px;position:relative;overflow:visible;}
 .clfill{height:100%;border-radius:2px;transition:width .6s ease;}
 .clprice{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;font-family:'Share Tech Mono',monospace;}
+.price-line{position:absolute;top:-4px;bottom:-4px;width:2px;border-radius:1px;background:var(--yellow);box-shadow:0 0 6px var(--yellow);z-index:5;transition:left .4s ease;pointer-events:none;}
+.price-line-tag{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:8px;color:#000;background:var(--yellow);padding:1px 4px;border-radius:2px;white-space:nowrap;font-family:'Share Tech Mono',monospace;line-height:1.4;}
 
 .cbar-wrap{margin:8px 0 4px;}
 .cbar-lbl{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:3px;}
@@ -273,7 +275,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
       <div class="ctitle">🔴 SHORT</div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP2</div><div class="clbar"><div class="clfill" style="background:var(--red);width:25%;opacity:.4;"></div><div class="clprice" style="color:var(--red);" id="sTP2">$—</div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP1</div><div class="clbar"><div class="clfill" style="background:var(--red);width:45%;opacity:.5;"></div><div class="clprice" style="color:var(--red);" id="sTP1">$—</div></div></div>
-      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar"><div class="clfill" style="background:var(--yellow);width:60%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="sEntry">$—</div></div></div></div>
+      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar" id="sEntryBar"><div class="clfill" style="background:var(--yellow);width:60%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="sEntry">$—</div><div class="price-line" id="sPriceLine" style="left:50%;display:none;"><div class="price-line-tag" id="sPriceTag">$—</div></div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--cyan);">SL</div><div class="clbar"><div class="clfill" style="background:var(--cyan);width:80%;opacity:.3;"></div><div class="clprice" style="color:var(--cyan);" id="sSL">$—</div></div></div>
       <div class="cbar-wrap"><div class="cbar-lbl"><span>CONFIDENCE</span><span id="sConf">—%</span></div><div class="cbar-track"><div class="cbar-fill" id="sCBar" style="width:0%;background:var(--red);"></div></div></div>
       <div style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;">
@@ -286,7 +288,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
       <div class="ctitle">🟢 LONG</div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP2</div><div class="clbar"><div class="clfill" style="background:var(--green);width:85%;opacity:.4;"></div><div class="clprice" style="color:var(--green);" id="lTP2">$—</div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP1</div><div class="clbar"><div class="clfill" style="background:var(--green);width:70%;opacity:.5;"></div><div class="clprice" style="color:var(--green);" id="lTP1">$—</div></div></div>
-      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar"><div class="clfill" style="background:var(--yellow);width:38%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="lEntry">$—</div></div></div></div>
+      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar" id="lEntryBar"><div class="clfill" style="background:var(--yellow);width:38%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="lEntry">$—</div><div class="price-line" id="lPriceLine" style="left:50%;display:none;"><div class="price-line-tag" id="lPriceTag">$—</div></div></div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--cyan);">SL</div><div class="clbar"><div class="clfill" style="background:var(--cyan);width:18%;opacity:.3;"></div><div class="clprice" style="color:var(--cyan);" id="lSL">$—</div></div></div>
       <div class="cbar-wrap"><div class="cbar-lbl"><span>CONFIDENCE</span><span id="lConf">—%</span></div><div class="cbar-track"><div class="cbar-fill" id="lCBar" style="width:0%;background:var(--green);"></div></div></div>
       <div style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;">
@@ -1228,7 +1230,7 @@ async function update(){
     const fe=el('fundEl');if(fe){fe.textContent=(fundingRate>0?'+':'')+fundingRate.toFixed(4)+'%';fe.style.color=frColor;}
     el('markEl').textContent='$'+fmt(parseFloat(fund.markPrice));
   }
-  updateAlerts(price);checkAlerts(price);
+  updateAlerts(price);checkAlerts(price);updatePriceLines(price);
   priceHist.push(price);if(priceHist.length>120)priceHist.shift();
   drawSpark('spArea','spLine',priceHist);
   if(tradeActive)updateTrade(price);
@@ -1288,6 +1290,44 @@ function drawSpark(aid,lid,data){
   const pts=data.map((v,i)=>[i/(data.length-1)*W,H-p-(v-mn)/rng*(H-p*2)]);
   const line=pts.map((pt,i)=>`${i===0?'M':'L'}${pt[0].toFixed(1)},${pt[1].toFixed(1)}`).join(' ');
   el(lid).setAttribute('d',line);el(aid).setAttribute('d',line+` L${W},${H} L0,${H} Z`);}
+
+// Price Line — เส้นแสดงราคาปัจจุบันบน Entry Bar
+function updatePriceLines(price){
+  if(!C.shortLow||!C.slShort)return;
+
+  // SHORT card: range = SL (top) → TP2 (bottom)
+  // Bar แสดงจาก TP2 (ซ้ายสุด) ถึง SL (ขวาสุด)
+  const sMin=C.sTP2,sMax=C.slShort,sRange=sMax-sMin||1;
+  const sPct=Math.max(1,Math.min(99,((price-sMin)/sRange*100)));
+  const sLine=el('sPriceLine'),sTag=el('sPriceTag');
+  if(sLine&&sTag){
+    sLine.style.display='block';
+    sLine.style.left=sPct.toFixed(1)+'%';
+    sTag.textContent='$'+fmt(price,0);
+    // สีตาม zone
+    const inSEntry=price>=C.shortLow&&price<=C.shortHigh;
+    const aboveSL=price>C.slShort;
+    sLine.style.background=aboveSL?'var(--red)':inSEntry?'var(--yellow)':'var(--yellow)';
+    sLine.style.boxShadow='0 0 6px '+(aboveSL?'var(--red)':'var(--yellow)');
+    sTag.style.background=aboveSL?'var(--red)':inSEntry?'var(--yellow)':'var(--yellow)';
+  }
+
+  // LONG card: range = SL (ซ้ายสุด) → TP2 (ขวาสุด)
+  const lMin=C.slLong,lMax=C.lTP2,lRange=lMax-lMin||1;
+  const lPct=Math.max(1,Math.min(99,((price-lMin)/lRange*100)));
+  const lLine=el('lPriceLine'),lTag=el('lPriceTag');
+  if(lLine&&lTag){
+    lLine.style.display='block';
+    lLine.style.left=lPct.toFixed(1)+'%';
+    lTag.textContent='$'+fmt(price,0);
+    const inLEntry=price>=C.longLow&&price<=C.longHigh;
+    const belowSL=price<C.slLong;
+    lLine.style.background=belowSL?'var(--red)':inLEntry?'var(--green)':'var(--yellow)';
+    lLine.style.boxShadow='0 0 6px '+(belowSL?'var(--red)':inLEntry?'var(--green)':'var(--yellow)');
+    lTag.style.background=belowSL?'var(--red)':inLEntry?'var(--green)':'var(--yellow)';
+    lTag.style.color=inLEntry?'#000':'#000';
+  }
+}
 
 // Alert cards
 function updateAlerts(p){
