@@ -719,66 +719,71 @@ function playAlert(type){
 // ════════════════════════════════════════
 let _swReg=null;
 
-// SW Code — install+activate+message+click
-const _SW_CODE=[
-  "self.addEventListener('install',()=>self.skipWaiting());",
-  "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));",
-  "self.addEventListener('message',e=>{",
-  "  if(!e.data||e.data.type!=='ALERT')return;",
-  "  var o={body:e.data.body||'',tag:e.data.tag||'eth',renotify:true,",
-  "    vibrate:[300,100,300,100,300],requireInteraction:false,silent:false,",
-  "    icon:'https://cryptologos.cc/logos/ethereum-eth-logo.png'};",
-  "  e.waitUntil(self.registration.showNotification(e.data.title,o));",
-  "});",
-  "self.addEventListener('notificationclick',e=>{",
-  "  e.notification.close();",
-  "  e.waitUntil(clients.matchAll({type:'window'}).then(function(cs){",
-  "    if(cs.length>0)cs[0].focus();else clients.openWindow('/');",
-  "  }));",
-  "});"
-].join('\n');
+// ════════════════════════════════════════
+// NOTIFICATION SYSTEM v3
+// GitHub Pages ไม่รองรับ Blob SW → ใช้ Direct Notification API
+// ซึ่งขึ้น Status Bar ได้เมื่อ Permission = granted
+// ════════════════════════════════════════
 
+// ── ลอง register SW จาก path จริงของ GitHub Pages ──
 async function registerSW(){
   if(!('serviceWorker' in navigator)){
-    addLog('⚠️ SW ไม่รองรับ — ใช้ Direct Notification','var(--yellow)');return;
+    addLog('📲 ใช้ Direct Notification (SW ไม่รองรับ)','var(--cyan)');
+    return;
   }
+  // GitHub Pages: ลอง register /sw.js ถ้ามี
+  // ถ้าไม่มี → fall through to Direct Notification (ซึ่งทำงานได้อยู่แล้ว)
   try{
-    const blob=new Blob([_SW_CODE],{type:'application/javascript'});
-    const url=URL.createObjectURL(blob);
-    const reg=await navigator.serviceWorker.register(url,{scope:'./'});
+    const reg=await navigator.serviceWorker.register('/Eth-cone/sw.js',{scope:'/Eth-cone/'});
     await navigator.serviceWorker.ready;
     _swReg=reg;
-    addLog('✅ Service Worker พร้อม — Status Bar ทำงาน','var(--green)','var(--green)');
-    setTimeout(()=>sendNotif('🔔 ETH Cone v5.2 พร้อม!','Notification ขึ้น Status Bar ได้แล้ว','sw-test'),1000);
+    addLog('✅ Service Worker พร้อม','var(--green)','var(--green)');
   }catch(e){
-    addLog('⚠️ SW ลงทะเบียนไม่ได้ ('+e.message+') — ใช้ Direct Notification','var(--yellow)');
+    // SW ไม่มี หรือ scope ไม่ถูก → ใช้ Direct Notification แทน (ยังขึ้น Status Bar ได้)
     _swReg=null;
+    addLog('📲 Direct Notification พร้อม (SW ไม่ได้ใช้)','var(--cyan)');
   }
 }
 
+// ── ส่ง Notification ขึ้น Status Bar ──
+// Direct Notification API ขึ้น Status Bar ได้เมื่อ:
+// - Chrome ได้รับ Permission = granted
+// - Tab active หรือ background (Android Chrome 88+)
 async function sendNotif(title,body,tag='eth'){
   if(Notification.permission!=='granted')return;
-  // วิธี 1: ผ่าน SW (ขึ้น Status Bar แม้ปิด Tab)
+
+  // วิธี 1: ผ่าน SW ถ้ามี
   if(_swReg){
     try{
       const sw=_swReg.active||_swReg.waiting||_swReg.installing;
       if(sw){sw.postMessage({type:'ALERT',title,body,tag});return;}
       await _swReg.showNotification(title,{
-        body,tag,renotify:true,vibrate:[300,100,300],
-        icon:'https://cryptologos.cc/logos/ethereum-eth-logo.png'});
+        body,tag,renotify:true,
+        vibrate:[300,100,300,100,300],
+        icon:'https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Ethereum_logo_2014.svg/32px-Ethereum_logo_2014.svg.png'
+      });
       return;
     }catch(e){}
   }
-  // วิธี 2: Direct Notification API
+
+  // วิธี 2: Direct Notification API — ขึ้น Status Bar บน Android Chrome
   try{
     const n=new Notification(title,{
-      body,tag,renotify:true,
-      icon:'https://cryptologos.cc/logos/ethereum-eth-logo.png',
-      vibrate:[300,100,300]
+      body,
+      tag,
+      renotify:true,
+      icon:'https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Ethereum_logo_2014.svg/32px-Ethereum_logo_2014.svg.png',
+      badge:'https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Ethereum_logo_2014.svg/32px-Ethereum_logo_2014.svg.png',
+      vibrate:[300,100,300,100,300],
+      requireInteraction:false,
+      silent:false
     });
     n.onclick=()=>{window.focus();n.close();};
-    setTimeout(()=>n.close(),8000);
-  }catch(e){}
+    setTimeout(()=>n.close(),10000);
+  }catch(e){
+    // Fallback: ถ้า Direct ไม่ได้ → In-app alert เท่านั้น
+    addLog('🔔 '+title+': '+body,'var(--yellow)');
+  }
 }
 
 // Wake Lock
@@ -793,7 +798,7 @@ async function requestNotif(){
   if(!('Notification' in window)){addLog('❌ Browser ไม่รองรับ Notification','var(--red)');return;}
   if(Notification.permission==='denied'){
     showAlert('info','⚙️','เปิด Notification ใน Settings',0,
-      '1. Chrome → ⋮ (จุด 3 จุด) → Settings\n2. Site Settings → Notifications\n3. หา upperpulse.github.io → Allow\n\nหรือ กด 🔒 ข้าง URL → Site Settings → Notifications → Allow',
+      '1. Chrome → ⋮ → Settings\n2. Site Settings → Notifications\n3. หา upperpulse.github.io → Allow\n\nหรือ กด 🔒 ข้าง URL → Site Settings → Notifications → Allow',
       'var(--yellow)',[{lbl:'✓ เข้าใจแล้ว',cls:'var(--yellow)',fn:'closeAlert()'}]);
     return;
   }
@@ -802,7 +807,10 @@ async function requestNotif(){
   if(notifGranted){
     el('notifBanner').classList.add('gone');
     el('btnNotif').textContent='✅ Notification On';
-    addLog('✅ Permission ได้รับ — กำลัง Register SW...','var(--green)','var(--green)');
+    addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
+    // ทดสอบทันที
+    await sendNotif('🔔 ETH Cone v5.2 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    // ลอง register SW (optional)
     await registerSW();
   }else{
     addLog('❌ ผู้ใช้ไม่อนุญาต Notification','var(--red)');
