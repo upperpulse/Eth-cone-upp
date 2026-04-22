@@ -29,7 +29,7 @@ self.addEventListener('notificationclick', e => {
   e.waitUntil(
     clients.matchAll({ type: 'window' }).then(cs => {
       if (cs.length > 0) cs[0].focus();
-      else clients.openWindow('/Eth-cone/');
+      else clients.openWindow('/Eth-cone-upp/');
     })
   );
 });
