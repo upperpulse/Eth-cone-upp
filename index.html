@@ -4,11 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ETH Cone v5.2 — nattajoe</title>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#02080f;--bg2:#050e1a;--bg3:#081422;--green:#00ff9d;--red:#ff2d55;--yellow:#ffc700;--cyan:#00d4ff;--orange:#ff6b2b;--purple:#a855f7;--dim:#0b1c2e;--text:#9dc8e8;--muted:#2a4a6a;--border:#0a1e35;}
 *{margin:0;padding:0;box-sizing:border-box;}
-body{background:var(--bg);color:var(--text);font-family:'Barlow Condensed',sans-serif;min-height:100vh;overflow-x:hidden;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;overflow-x:hidden;}
 body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 70% 50% at 15% 10%,rgba(0,212,255,0.05) 0%,transparent 55%),radial-gradient(ellipse 50% 60% at 85% 90%,rgba(0,255,157,0.04) 0%,transparent 55%),linear-gradient(rgba(0,212,255,0.018) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.018) 1px,transparent 1px);background-size:100% 100%,100% 100%,40px 40px,40px 40px;pointer-events:none;z-index:0;}
 body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;background:linear-gradient(90deg,transparent,rgba(0,212,255,0.5),transparent);animation:scan 6s linear infinite;z-index:999;pointer-events:none;}
 @keyframes scan{0%{top:-1px}100%{top:100vh}}
@@ -28,7 +28,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 .tab-content{display:none;}
 .tab-content.active{display:block;}
 .ctrl-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
-.cbtn{padding:6px 12px;border-radius:3px;font-size:9px;letter-spacing:2px;cursor:pointer;border:1px solid;background:transparent;font-family:'Barlow Condensed',sans-serif;transition:all .2s;white-space:nowrap;}
+.cbtn{padding:6px 12px;border-radius:3px;font-size:9px;letter-spacing:2px;cursor:pointer;border:1px solid;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;transition:all .2s;white-space:nowrap;}
 .cbtn:hover{transform:translateY(-1px);}
 .cbtn.cy{border-color:var(--cyan);color:var(--cyan);}
 .cbtn.cy:hover{background:rgba(0,212,255,.1);}
@@ -83,7 +83,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 .bbull{background:rgba(0,255,157,.15);color:var(--green);}
 .bbear{background:rgba(255,45,85,.15);color:var(--red);}
 .bneut{background:rgba(255,199,0,.12);color:var(--yellow);}
-.bblue{background:rgba(0,212,255,.12);color:var(--cyan);}
+
 .srow{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(10,30,56,.5);}
 .srow:last-child{border-bottom:none;}
 .sk{font-size:10px;color:var(--muted);}
@@ -93,8 +93,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 .clbar{flex:1;height:20px;background:var(--dim);border-radius:2px;position:relative;overflow:visible;}
 .clfill{height:100%;border-radius:2px;transition:width .6s ease;}
 .clprice{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;font-family:'Share Tech Mono',monospace;}
-.pneedle{position:absolute;width:2px;top:-5px;bottom:-5px;border-radius:1px;background:var(--yellow);box-shadow:0 0 8px var(--yellow);transition:left .5s ease;z-index:5;}
-.ntag{position:absolute;top:-17px;left:50%;transform:translateX(-50%);font-size:8px;color:var(--yellow);background:var(--bg2);padding:0 3px;font-family:'Share Tech Mono',monospace;white-space:nowrap;}
+
 .cbar-wrap{margin:8px 0 4px;}
 .cbar-lbl{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:3px;}
 .cbar-track{height:5px;background:var(--dim);border-radius:3px;overflow:hidden;}
@@ -119,8 +118,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 .logt{color:var(--muted);min-width:46px;font-family:'Share Tech Mono',monospace;}
 .logd{width:5px;height:5px;border-radius:50%;flex-shrink:0;margin-top:3px;}
 .logm{flex:1;line-height:1.4;}
-.spark-path{fill:none;stroke:var(--cyan);stroke-width:1.5;}
-.spark-area{fill:url(#sg);opacity:.1;}
+
 /* RING */
 .ring-wrap{position:relative;width:110px;height:110px;margin:0 auto 10px;}
 .ring-svg{width:110px;height:110px;transform:rotate(-90deg);}
@@ -177,11 +175,11 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 .basrow:last-child{border-bottom:none;}
 .bask{color:var(--muted);}
 .basv{font-family:'Share Tech Mono',monospace;}
-.notebox{width:100%;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:3px;padding:7px 10px;color:var(--text);font-family:'Barlow Condensed',sans-serif;font-size:11px;resize:none;height:50px;margin-bottom:10px;}
+.notebox{width:100%;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:3px;padding:7px 10px;color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:11px;resize:none;height:50px;margin-bottom:10px;}
 .notebox:focus{outline:none;border-color:var(--cyan);}
 .notebox::placeholder{color:var(--muted);}
 .btn-row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
-.rbtn{padding:8px 18px;border-radius:3px;font-size:9px;letter-spacing:2px;font-family:'Barlow Condensed',sans-serif;cursor:pointer;border:1px solid;background:transparent;transition:all .2s;}
+.rbtn{padding:8px 18px;border-radius:3px;font-size:9px;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;cursor:pointer;border:1px solid;background:transparent;transition:all .2s;}
 .rbtn:hover{transform:translateY(-1px);}
 /* ANALYZING */
 .analyzing{display:none;position:fixed;inset:0;z-index:400;background:rgba(2,8,15,.92);align-items:center;justify-content:center;flex-direction:column;backdrop-filter:blur(6px);}
@@ -194,11 +192,9 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 .an-pf{height:100%;background:var(--cyan);border-radius:2px;transition:width .3s ease;}
 .notif-banner{background:rgba(255,199,0,.06);border:1px solid rgba(255,199,0,.25);border-radius:4px;padding:8px 14px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10px;}
 .notif-banner.gone{display:none;}
-.news-item{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid rgba(10,30,56,.5);font-size:10px;line-height:1.5;}
-.news-item:last-child{border-bottom:none;}
-.news-ico{font-size:12px;flex-shrink:0;margin-top:1px;}
-.nimp{font-size:8px;letter-spacing:1px;margin-top:2px;}
-.spin-ico{display:inline-block;width:12px;height:12px;border:2px solid var(--dim);border-top-color:var(--cyan);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;}
+
+
+
 .footer{font-size:8px;color:var(--muted);letter-spacing:2px;text-align:center;padding-top:10px;border-top:1px solid var(--border);margin-top:6px;}
 .blink{animation:bl 1.2s step-end infinite;}
 @keyframes bl{0%,100%{opacity:1}50%{opacity:0}}
@@ -238,7 +234,6 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   <div class="tab" onclick="sw('alerts')">🔔 ALERTS</div>
   <div class="tab" onclick="sw('trade')">🎯 TRADE</div>
   <div class="tab" onclick="sw('multitf')">📈 MULTI-TF</div>
-  <div class="tab" onclick="sw('news')">📰 NEWS</div>
   <div class="tab" onclick="sw('history')">📋 HISTORY</div>
   <div class="tab" onclick="sw('analytics')">📊 ANALYTICS</div>
 </div>
@@ -275,28 +270,28 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
   <div class="grid2">
     <div class="card rd" style="margin-bottom:0;">
-      <div class="ctitle">🔴 SHORT — <span id="sName" style="color:var(--red);">Risk-Off Fade</span></div>
+      <div class="ctitle">🔴 SHORT</div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP2</div><div class="clbar"><div class="clfill" style="background:var(--red);width:25%;opacity:.4;"></div><div class="clprice" style="color:var(--red);" id="sTP2">$—</div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP1</div><div class="clbar"><div class="clfill" style="background:var(--red);width:45%;opacity:.5;"></div><div class="clprice" style="color:var(--red);" id="sTP1">$—</div></div></div>
-      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar"><div class="clfill" style="background:var(--yellow);width:60%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="sEntry">$—</div><div class="pneedle" id="sNeedle"><div class="ntag" id="sNTag">$—</div></div></div></div>
+      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar"><div class="clfill" style="background:var(--yellow);width:60%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="sEntry">$—</div></div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--cyan);">SL</div><div class="clbar"><div class="clfill" style="background:var(--cyan);width:80%;opacity:.3;"></div><div class="clprice" style="color:var(--cyan);" id="sSL">$—</div></div></div>
       <div class="cbar-wrap"><div class="cbar-lbl"><span>CONFIDENCE</span><span id="sConf">—%</span></div><div class="cbar-track"><div class="cbar-fill" id="sCBar" style="width:0%;background:var(--red);"></div></div></div>
       <div style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;">
         <span style="color:var(--muted);">R:R <span id="sRR" style="color:var(--green);font-family:'Share Tech Mono'">—</span></span>
-        <span style="color:var(--muted);">HOLD <span id="sHold" style="font-family:'Share Tech Mono'">4–12H</span></span>
+        
         <span style="color:var(--muted);">TF <span style="color:var(--yellow);font-family:'Share Tech Mono'">⭐1H</span></span>
       </div>
     </div>
     <div class="card gn" style="margin-bottom:0;">
-      <div class="ctitle">🟢 LONG — <span id="lName" style="color:var(--green);">Whale Ride</span></div>
+      <div class="ctitle">🟢 LONG</div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP2</div><div class="clbar"><div class="clfill" style="background:var(--green);width:85%;opacity:.4;"></div><div class="clprice" style="color:var(--green);" id="lTP2">$—</div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP1</div><div class="clbar"><div class="clfill" style="background:var(--green);width:70%;opacity:.5;"></div><div class="clprice" style="color:var(--green);" id="lTP1">$—</div></div></div>
-      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar"><div class="clfill" style="background:var(--yellow);width:38%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="lEntry">$—</div><div class="pneedle" id="lNeedle"><div class="ntag" id="lNTag">$—</div></div></div></div>
+      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar"><div class="clfill" style="background:var(--yellow);width:38%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="lEntry">$—</div></div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--cyan);">SL</div><div class="clbar"><div class="clfill" style="background:var(--cyan);width:18%;opacity:.3;"></div><div class="clprice" style="color:var(--cyan);" id="lSL">$—</div></div></div>
       <div class="cbar-wrap"><div class="cbar-lbl"><span>CONFIDENCE</span><span id="lConf">—%</span></div><div class="cbar-track"><div class="cbar-fill" id="lCBar" style="width:0%;background:var(--green);"></div></div></div>
       <div style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;">
         <span style="color:var(--muted);">R:R <span id="lRR" style="color:var(--green);font-family:'Share Tech Mono'">—</span></span>
-        <span style="color:var(--muted);">HOLD <span id="lHold" style="font-family:'Share Tech Mono'">6–16H</span></span>
+        
         <span style="color:var(--muted);">TF <span style="color:var(--yellow);font-family:'Share Tech Mono'">⭐1H</span></span>
       </div>
     </div>
@@ -586,20 +581,6 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<!-- NEWS -->
-<div class="tab-content" id="tab-news">
-  <div class="card rd">
-    <div class="ctitle">📰 HOT NEWS — เวลาไทย</div>
-    <div class="news-item"><div class="news-ico">🟢</div><div><div>Whale 0xeCE7 ซื้อ 32,007 ETH ($77.5M) ออกจาก Binance</div><div class="nimp" style="color:var(--green);">IMPACT สูง · Bullish Accumulation · 21 เม.ย. 18:00 น.</div></div></div>
-    <div class="news-item"><div class="news-ico">🟢</div><div><div>Whale กำไร $44.6M เพิ่ม Long 30,000 ETH avg $2,288 · 15x Lev</div><div class="nimp" style="color:var(--green);">IMPACT สูงมาก · Whale Conviction Long</div></div></div>
-    <div class="news-item"><div class="news-ico">🟢</div><div><div>Global ETP Inflows $1.4B — สูงสุดตั้งแต่ ม.ค. 2026</div><div class="nimp" style="color:var(--green);">IMPACT สูง · Institutional Flow</div></div></div>
-    <div class="news-item"><div class="news-ico">🟢</div><div><div>US-Iran Ceasefire Talks · BTC $75,733 · Risk-On กลับมา</div><div class="nimp" style="color:var(--green);">IMPACT สูง · Risk-On Sentiment</div></div></div>
-    <div class="news-item"><div class="news-ico">🟡</div><div><div>Arbitrum Freeze 30,766 ETH ของ KelpDAO Hacker</div><div class="nimp" style="color:var(--yellow);">IMPACT กลาง · DeFi Sentiment ฟื้น</div></div></div>
-    <div class="news-item"><div class="news-ico">🔴</div><div><div>KelpDAO Hack $292M — DeFi TVL -$13.2B ใน 48H</div><div class="nimp" style="color:var(--red);">IMPACT สูง · Bearish DeFi</div></div></div>
-    <div class="news-item"><div class="news-ico">🔴</div><div><div>Fear & Greed Index = 33 — Fear Zone</div><div class="nimp" style="color:var(--red);">IMPACT กลาง · Sentiment ยังไม่ฟื้น</div></div></div>
-  </div>
-</div>
-
 <!-- HISTORY -->
 <div class="tab-content" id="tab-history">
   <div class="card cy">
@@ -670,7 +651,6 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   <div class="an-prog"><div class="an-pf" id="anPF" style="width:0%;"></div></div>
 </div>
 
-
 <script>
 // ═══════════════════════════════════════
 // ETH CONE ULTIMATE v5.2 — nattajoe
@@ -706,7 +686,7 @@ let C={shortLow:0,shortHigh:0,longLow:0,longHigh:0,
 // Trade
 let tradeActive=false,tradeEntry=0,tradeTP1=0,tradeTP2=0,tradeSL=0;
 let tradeDir='long',tradeTF='1h',tradeSize=100,tradeQty=0;
-let customDurSecs=3600,tradeEndTime=0,tradeTimerInt=null;
+let customDurSecs=3600,tradeEndTime=0;
 let tradeMaxP=0,tradeMaxL=0,tradeSHigh=0,tradeSLow=999999;
 let tradePriceHist=[],tradeStart=null,tp1Hit=false,tradeFinished=false;
 const TF_LBL={'1m':'1m','5m':'5m','15m':'15m','1h':'1H','4h':'4H','1d':'1D','1w':'1W','1M':'1M'};
@@ -734,16 +714,71 @@ function playAlert(type){
   else if(type==='lose'){beep(440,.2,'square',.5);setTimeout(()=>beep(330,.3,'square',.5),240);}
   else beep(523,.2,'triangle',.4);}
 
-// Service Worker
-function registerSW(){
-  if(!('serviceWorker' in navigator))return;
-  const code=`self.addEventListener('message',e=>{if(e.data&&e.data.type==='ALERT'){self.registration.showNotification(e.data.title,{body:e.data.body,vibrate:[200,100,200],tag:e.data.tag||'eth',renotify:true});}});`;
-  const url=URL.createObjectURL(new Blob([code],{type:'application/javascript'}));
-  navigator.serviceWorker.register(url,{scope:'/'}).then(r=>{window._swReg=r;addLog('✅ SW — Background Alert พร้อม','var(--green)','var(--green)');}).catch(()=>{});
+// ════════════════════════════════════════
+// NOTIFICATION SYSTEM v2 — Android Status Bar
+// ════════════════════════════════════════
+let _swReg=null;
+
+// SW Code — install+activate+message+click
+const _SW_CODE=[
+  "self.addEventListener('install',()=>self.skipWaiting());",
+  "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));",
+  "self.addEventListener('message',e=>{",
+  "  if(!e.data||e.data.type!=='ALERT')return;",
+  "  var o={body:e.data.body||'',tag:e.data.tag||'eth',renotify:true,",
+  "    vibrate:[300,100,300,100,300],requireInteraction:false,silent:false,",
+  "    icon:'https://cryptologos.cc/logos/ethereum-eth-logo.png'};",
+  "  e.waitUntil(self.registration.showNotification(e.data.title,o));",
+  "});",
+  "self.addEventListener('notificationclick',e=>{",
+  "  e.notification.close();",
+  "  e.waitUntil(clients.matchAll({type:'window'}).then(function(cs){",
+  "    if(cs.length>0)cs[0].focus();else clients.openWindow('/');",
+  "  }));",
+  "});"
+].join('\n');
+
+async function registerSW(){
+  if(!('serviceWorker' in navigator)){
+    addLog('⚠️ SW ไม่รองรับ — ใช้ Direct Notification','var(--yellow)');return;
+  }
+  try{
+    const blob=new Blob([_SW_CODE],{type:'application/javascript'});
+    const url=URL.createObjectURL(blob);
+    const reg=await navigator.serviceWorker.register(url,{scope:'./'});
+    await navigator.serviceWorker.ready;
+    _swReg=reg;
+    addLog('✅ Service Worker พร้อม — Status Bar ทำงาน','var(--green)','var(--green)');
+    setTimeout(()=>sendNotif('🔔 ETH Cone v5.2 พร้อม!','Notification ขึ้น Status Bar ได้แล้ว','sw-test'),1000);
+  }catch(e){
+    addLog('⚠️ SW ลงทะเบียนไม่ได้ ('+e.message+') — ใช้ Direct Notification','var(--yellow)');
+    _swReg=null;
+  }
 }
-function sendNotif(title,body,tag='eth'){
-  if(window._swReg&&window._swReg.active)window._swReg.active.postMessage({type:'ALERT',title,body,tag});
-  else if(notifGranted)try{new Notification(title,{body});}catch{}
+
+async function sendNotif(title,body,tag='eth'){
+  if(Notification.permission!=='granted')return;
+  // วิธี 1: ผ่าน SW (ขึ้น Status Bar แม้ปิด Tab)
+  if(_swReg){
+    try{
+      const sw=_swReg.active||_swReg.waiting||_swReg.installing;
+      if(sw){sw.postMessage({type:'ALERT',title,body,tag});return;}
+      await _swReg.showNotification(title,{
+        body,tag,renotify:true,vibrate:[300,100,300],
+        icon:'https://cryptologos.cc/logos/ethereum-eth-logo.png'});
+      return;
+    }catch(e){}
+  }
+  // วิธี 2: Direct Notification API
+  try{
+    const n=new Notification(title,{
+      body,tag,renotify:true,
+      icon:'https://cryptologos.cc/logos/ethereum-eth-logo.png',
+      vibrate:[300,100,300]
+    });
+    n.onclick=()=>{window.focus();n.close();};
+    setTimeout(()=>n.close(),8000);
+  }catch(e){}
 }
 
 // Wake Lock
@@ -753,15 +788,25 @@ async function reqWakeLock(){
 }
 async function relWakeLock(){if(wakeLock)try{await wakeLock.release();}catch{}wakeLock=null;}
 
-// Notification
-function requestNotif(){
-  if(!('Notification' in window)){addLog('❌ Browser ไม่รองรับ','var(--red)');return;}
-  Notification.requestPermission().then(p=>{
-    notifGranted=p==='granted';
-    if(notifGranted){el('notifBanner').classList.add('gone');el('btnNotif').textContent='✅ Notification On';
-      addLog('✅ Notification เปิด','var(--green)','var(--green)');registerSW();
-      setTimeout(()=>sendNotif('ETH Cone v5.2 ✅','Baseline Ready'),500);}
-    else addLog('⚠️ ไม่ได้รับอนุญาต','var(--yellow)');});
+// Notification Permission
+async function requestNotif(){
+  if(!('Notification' in window)){addLog('❌ Browser ไม่รองรับ Notification','var(--red)');return;}
+  if(Notification.permission==='denied'){
+    showAlert('info','⚙️','เปิด Notification ใน Settings',0,
+      '1. Chrome → ⋮ (จุด 3 จุด) → Settings\n2. Site Settings → Notifications\n3. หา upperpulse.github.io → Allow\n\nหรือ กด 🔒 ข้าง URL → Site Settings → Notifications → Allow',
+      'var(--yellow)',[{lbl:'✓ เข้าใจแล้ว',cls:'var(--yellow)',fn:'closeAlert()'}]);
+    return;
+  }
+  const perm=await Notification.requestPermission();
+  notifGranted=perm==='granted';
+  if(notifGranted){
+    el('notifBanner').classList.add('gone');
+    el('btnNotif').textContent='✅ Notification On';
+    addLog('✅ Permission ได้รับ — กำลัง Register SW...','var(--green)','var(--green)');
+    await registerSW();
+  }else{
+    addLog('❌ ผู้ใช้ไม่อนุญาต Notification','var(--red)');
+  }
 }
 
 // Utils
@@ -774,7 +819,7 @@ function setTV(id,val,color='var(--text)'){const e=el(id);if(e){e.textContent=va
 
 // Tabs
 function sw(t){
-  const ids=['main','trigger','alerts','trade','multitf','news','history','analytics'];
+  const ids=['main','trigger','alerts','trade','multitf','history','analytics'];
   document.querySelectorAll('.tab').forEach((e,i)=>e.classList.toggle('active',ids[i]===t));
   document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
   el('tab-'+t).classList.add('active');
@@ -1084,7 +1129,14 @@ async function runEngine(kd){
 
 // ─── UPDATE MAIN UI ───
 function updateMainUI(d){
-  el('sTP2').textContent='$'+fmt(C.sTP2);el('sTP1').textContent='$'+fmt(C.sTP1);
+  // Dynamic strategy names
+const sStratName=d.preburst.includes('SHORT')?d.preburst:'Risk-Off Fade';
+const lStratName=d.preburst.includes('LONG')?d.preburst:'Squeeze Reversal';
+const sNameEl=document.querySelector('#tab-main .card.rd .ctitle');
+const lNameEl=document.querySelector('#tab-main .card.gn .ctitle');
+if(sNameEl)sNameEl.innerHTML='🔴 SHORT — <span style="color:var(--red);font-size:9px;">'+sStratName+'</span>';
+if(lNameEl)lNameEl.innerHTML='🟢 LONG — <span style="color:var(--green);font-size:9px;">'+lStratName+'</span>';
+el('sTP2').textContent='$'+fmt(C.sTP2);el('sTP1').textContent='$'+fmt(C.sTP1);
   el('sEntry').textContent='$'+fmt(C.shortLow)+'–'+fmt(C.shortHigh);el('sSL').textContent='$'+fmt(C.slShort);
   el('lTP2').textContent='$'+fmt(C.lTP2);el('lTP1').textContent='$'+fmt(C.lTP1);
   el('lEntry').textContent='$'+fmt(C.longLow)+'–'+fmt(C.longHigh);el('lSL').textContent='$'+fmt(C.lSL||C.slLong);
@@ -1168,7 +1220,7 @@ async function update(){
     const fe=el('fundEl');if(fe){fe.textContent=(fundingRate>0?'+':'')+fundingRate.toFixed(4)+'%';fe.style.color=frColor;}
     el('markEl').textContent='$'+fmt(parseFloat(fund.markPrice));
   }
-  updateNeedles(price);updateAlerts(price);checkAlerts(price);
+  updateAlerts(price);checkAlerts(price);
   priceHist.push(price);if(priceHist.length>120)priceHist.shift();
   drawSpark('spArea','spLine',priceHist);
   if(tradeActive)updateTrade(price);
@@ -1229,13 +1281,6 @@ function drawSpark(aid,lid,data){
   const line=pts.map((pt,i)=>`${i===0?'M':'L'}${pt[0].toFixed(1)},${pt[1].toFixed(1)}`).join(' ');
   el(lid).setAttribute('d',line);el(aid).setAttribute('d',line+` L${W},${H} L0,${H} Z`);}
 
-// Needles
-function updateNeedles(price){
-  if(!C.shortLow)return;const rng=C.slShort-C.slLong||1;
-  const pct=Math.max(2,Math.min(98,((price-C.slLong)/rng*100)));
-  el('sNeedle').style.left=pct.toFixed(1)+'%';el('sNTag').textContent='▼ $'+fmt(price);
-  el('lNeedle').style.left=pct.toFixed(1)+'%';el('lNTag').textContent='▼ $'+fmt(price);}
-
 // Alert cards
 function updateAlerts(p){
   if(!C.shortLow)return;
@@ -1246,6 +1291,7 @@ function updateAlerts(p){
   el('azd-long').textContent=inL?'✅ อยู่ใน Zone!':`ห่าง -$${fmt(Math.max(0,dL),0)} ▼`;el('azd-long').style.color=inL?'var(--green)':'var(--muted)';
   el('azf-long').style.width=Math.max(0,Math.min(100,(1-dL/200)*100))+'%';setAzSt('azs-long',inL?'HIT':'WATCH');
   // FIX 6: แสดง Whale Liq dynamic
+  const azpWEl=el('azpWhale');if(azpWEl)azpWEl.textContent='$'+fmt(C.whaleLiq);
   const dW=Math.abs(p-C.whaleLiq),nW=dW<25;
   el('azd-whale').textContent=`ห่าง $${fmt(dW,0)} (Liq Est. $${fmt(C.whaleLiq)})`;el('azd-whale').style.color=nW?'var(--orange)':'var(--muted)';
   el('azf-whale').style.width=Math.max(0,Math.min(100,(1-dW/200)*100))+'%';setAzSt('azs-whale',nW?'NEAR':'WATCH');
@@ -1284,30 +1330,83 @@ async function startTrade(){
   el('tEntry').textContent='$'+fmt(tradeEntry);el('tTP1').textContent='$'+fmt(tradeTP1);
   el('tTP2').textContent='$'+fmt(tradeTP2);el('tSL').textContent='$'+fmt(tradeSL);
   el('tradeMeta').textContent=`TF:${TF_LBL[tradeTF]} · ${tradeDir.toUpperCase()} · $${tradeSize} · Dur:${fmtDur(customDurSecs)}`;
-  clearInterval(tradeTimerInt);tradeTimerInt=setInterval(tickTimer,500);
+  // ยกเลิก interval เก่า แล้วเริ่ม loop ใหม่
+  
+  startTimerLoop();
   reqWakeLock();
   addLog(`🚀 ${tradeDir.toUpperCase()} TF:${TF_LBL[tradeTF]} $${tradeSize} Entry:$${fmt(price)} Dur:${fmtDur(customDurSecs)}`,'var(--cyan)','var(--cyan)');
   sendNotif('🚀 Trade',tradeDir.toUpperCase()+' $'+fmt(price)+' | '+fmtDur(customDurSecs));}
 
-// Timestamp-based timer
+// ════════════════════════════════════════
+// TIMER LOOP — ทำงานถูกต้องแม้ Tab ไม่ active
+// ใช้ 3 ชั้น: rAF (foreground) + setTimeout 1s (background) + visibilitychange (sync)
+// ════════════════════════════════════════
+let _rafId=null,_timerTO=null,_lastTick=0;
+
+function startTimerLoop(){
+  // หยุด loop เก่า
+  if(_rafId){cancelAnimationFrame(_rafId);_rafId=null;}
+  if(_timerTO){clearTimeout(_timerTO);_timerTO=null;}
+  _lastTick=Date.now();
+  timerRafLoop();
+  timerBgLoop(); // background fallback loop
+}
+
+function stopTimerLoop(){
+  if(_rafId){cancelAnimationFrame(_rafId);_rafId=null;}
+  if(_timerTO){clearTimeout(_timerTO);_timerTO=null;}
+}
+
+// Foreground: requestAnimationFrame — smooth เมื่อ Tab active
+function timerRafLoop(){
+  if(tradeFinished){stopTimerLoop();return;}
+  const now=Date.now();
+  // อัปเดตทุก 250ms เพื่อไม่ให้ overload
+  if(now-_lastTick>=250){_lastTick=now;tickTimer();}
+  _rafId=requestAnimationFrame(timerRafLoop);
+}
+
+// Background: setTimeout 1s — ทำงานต่อเมื่อ Tab ไม่ active
+function timerBgLoop(){
+  if(tradeFinished)return;
+  tickTimer();
+  _timerTO=setTimeout(timerBgLoop,1000);
+}
+
+// Timestamp-based tick — คำนวณจากเวลาจริงเสมอ
 function tickTimer(){
   if(tradeFinished)return;
   const remaining=Math.max(0,Math.floor((tradeEndTime-Date.now())/1000));
-  const pct=remaining/customDurSecs;const circ=314;
+  const pct=customDurSecs>0?remaining/customDurSecs:0;
+  const circ=314;
   el('ringFill').style.strokeDashoffset=(circ*(1-pct)).toFixed(2);
   el('ringFill').style.stroke=pct>.5?'url(#rg)':pct>.25?'var(--yellow)':'var(--red)';
   const hh=Math.floor(remaining/3600),mm=Math.floor((remaining%3600)/60),ss=remaining%60;
-  el('tradeTimer').textContent=hh>0?`${hh}:${mm.toString().padStart(2,'0')}:${ss.toString().padStart(2,'0')}`:`${mm.toString().padStart(2,'0')}:${ss.toString().padStart(2,'0')}`;
+  el('tradeTimer').textContent=hh>0
+    ?`${hh}:${mm.toString().padStart(2,'0')}:${ss.toString().padStart(2,'0')}`
+    :`${mm.toString().padStart(2,'0')}:${ss.toString().padStart(2,'0')}`;
   el('tradePhase').textContent=pct>.66?'MONITORING':pct>.33?'MID SESSION':remaining>0?'🔥 FINAL':'DONE';
   if(remaining<=0)triggerResult('TIMEOUT');}
 
-// Page Visibility
-document.addEventListener('visibilitychange',()=>{
+// Page Visibility — force sync เมื่อ Tab กลับมา
+document.addEventListener('visibilitychange',async()=>{
   if(document.hidden)return;
+  // Re-register SW ถ้าหาย
+  if(notifGranted&&!_swReg)await registerSW();
+  // Timer: คำนวณ remaining จาก timestamp จริง ทันที
   if(!tradeActive||tradeFinished)return;
   const remaining=Math.max(0,Math.floor((tradeEndTime-Date.now())/1000));
-  if(remaining<=0){triggerResult('TIMEOUT');sendNotif('⏰ Trade หมดเวลา!','กลับมาดูผลได้เลย');}
-  else{tickTimer();addLog(`👁 Tab กลับมา — เหลือ ${fmtDur(remaining)}`,'var(--yellow)');reqWakeLock();}});
+  if(remaining<=0){
+    triggerResult('TIMEOUT');
+    sendNotif('⏰ Trade หมดเวลา!','กลับมาดูผลได้เลย');
+  }else{
+    tickTimer(); // update display ทันที
+    addLog('👁 Tab กลับมา — เหลือ '+fmtDur(remaining),'var(--yellow)');
+    reqWakeLock();
+    // restart rAF loop
+    if(_rafId){cancelAnimationFrame(_rafId);_rafId=null;}
+    timerRafLoop();
+  }});
 
 // Trade PnL
 function updateTrade(price){
@@ -1332,10 +1431,10 @@ function updateTrade(price){
     if(price<=tradeTP1&&!tp1Hit){tp1Hit=true;addLog('🎯 TP1 Hit!','var(--yellow)','var(--yellow)');}
     if(price>=tradeSL){triggerResult('SL');return;}
   }}
-function cancelTrade(){if(tradeActive){relWakeLock();triggerResult('MANUAL');}}
+function cancelTrade(){if(tradeActive){stopTimerLoop();relWakeLock();triggerResult('MANUAL');}}
 function triggerResult(type){
   if(tradeFinished)return;tradeFinished=true;tradeActive=false;
-  clearInterval(tradeTimerInt);relWakeLock();
+  stopTimerLoop();relWakeLock();
   const price=curPrice||tradeEntry;
   const diff=tradeDir==='long'?price-tradeEntry:tradeEntry-price;
   const pnl=diff*tradeQty,pct=(diff/tradeEntry)*100;
