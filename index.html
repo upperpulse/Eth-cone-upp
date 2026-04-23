@@ -895,11 +895,15 @@ if('serviceWorker' in navigator){
       addLog('🎯 SW: TP1 Hit ขณะปิด Tab! $'+fmt(e.data.price),'var(--yellow)','var(--yellow)');
     }
     if(e.data.type==='SW_RESULT'){
-      // SW ตรวจเจอ TP2/SL ขณะปิด Tab → ถ้า trade ยัง active ให้ trigger ผล
       if(tradeActive&&!tradeFinished){
-        curPrice=e.data.price;
+        curPrice=e.data.price||curPrice;
         triggerResult(e.data.result);
-        addLog('📲 SW Background Result: '+e.data.result+' $'+fmt(e.data.price),'var(--cyan)','var(--cyan)');
+        addLog('📲 SW Background: '+e.data.result+(e.data.price?' $'+fmt(e.data.price):''),'var(--cyan)','var(--cyan)');
+      } else if(!tradeActive&&e.data.result==='TIMEOUT'&&window._pt){
+        // Tab ปิดอยู่ SW บันทึกไม่ได้ — บันทึกตอนเปิด tab กลับมา
+        const l=loadLog();
+        const alreadySaved=l.length>0&&l[0].entry===window._pt.entry&&l[0].type===window._pt.type;
+        if(!alreadySaved){l.unshift(window._pt);saveLog(l);addLog('💾 SW Auto-save TIMEOUT','var(--yellow)','var(--yellow)');}
       }
     }
   });
@@ -1764,14 +1768,40 @@ function triggerResult(type){
   const rows=[['Direction',tradeDir.toUpperCase()],['TF',TF_LBL[tradeTF]],['Duration',fmtDur(customDurSecs)],['Entry','$'+fmt(tradeEntry)],['Exit','$'+fmt(price)],['PnL',(pnl>=0?'+$':'-$')+fmt(Math.abs(pnl))],['Move %',(pct>=0?'+':'')+fmt(pct)+'%'],['Elapsed',durStr],['Max Profit','+$'+fmt(tradeMaxP)],['Max Loss','-$'+fmt(Math.abs(tradeMaxL))],['TP1 Hit',tp1Hit?'✅ YES':'❌ NO']];
   const sumHTML=rows.map(([k,v])=>`<div class="basrow"><span class="bask">${k}</span><span class="basv">${v}</span></div>`).join('');
   window._pt={date:thaiDT(),tf:TF_LBL[tradeTF],dir:tradeDir,entry:tradeEntry,exit:price,tp1:tradeTP1,tp2:tradeTP2,sl:tradeSL,pnl,pct,type,dur:durStr,maxP:tradeMaxP,maxL:tradeMaxL,sHigh:tradeSHigh,sLow:tradeSLow,tp1Hit,note:''};
-  showAlert(cls[type],icons[type],type+' RESULT',price,'',colors[type],[{lbl:'💾 บันทึก + ใหม่',cls:colors[type],fn:'saveNew()'},{lbl:'📊 Analytics',cls:'var(--muted)',fn:"sw('analytics');closeAlert();"}],sumHTML,true);
+
+  // TIMEOUT และ SW_RESULT บันทึกอัตโนมัติ — ไม่ต้องรอกดปุ่ม
+  if(type==='TIMEOUT'||type==='TP2'||type==='SL'||type==='TP1'){
+    const l=loadLog();l.unshift(window._pt);saveLog(l);
+    addLog(`💾 บันทึกอัตโนมัติ — ${icons[type]} ${type}`,isWin?'var(--green)':type==='SL'?'var(--red)':'var(--yellow)');
+  }
+
+  showAlert(cls[type],icons[type],type+' RESULT',price,'',colors[type],
+    type==='TIMEOUT'
+      ?[{lbl:'📊 ดู Analytics',cls:'var(--yellow)',fn:"sw('analytics');closeAlert();"},{lbl:'🔄 Trade ใหม่',cls:'var(--cyan)',fn:'closeAlert();resetTrade();'}]
+      :[{lbl:'💾 บันทึก + ใหม่',cls:colors[type],fn:'saveNew()'},{lbl:'📊 Analytics',cls:'var(--muted)',fn:"sw('analytics');closeAlert();"}],
+    sumHTML,type!=='TIMEOUT');
   addLog(`${icons[type]} ${type} · ${tradeDir.toUpperCase()} · PnL:${pnl>=0?'+$':'-$'}${fmt(Math.abs(pnl))}`,isWin?'var(--green)':type==='SL'?'var(--red)':'var(--yellow)');}
-function saveNew(){
-  if(window._pt){window._pt.note=el('noteInput').value;const l=loadLog();l.unshift(window._pt);saveLog(l);addLog('💾 บันทึกแล้ว','var(--green)','var(--green)');}
-  closeAlert();el('tradePanel').style.display='none';el('tradeSetup').style.display='block';
+
+function resetTrade(){
+  el('tradePanel').style.display='none';el('tradeSetup').style.display='block';
   el('ringFill').style.strokeDashoffset='0';tradeActive=false;tradeFinished=false;}
 
-// Alert overlay
+function saveNew(){
+  if(window._pt){
+    // TP1/TP2/SL/TIMEOUT บันทึกอัตโนมัติแล้ว — บันทึกซ้ำเฉพาะ MANUAL หรือถ้ายังไม่มีใน log
+    const l=loadLog();
+    const alreadySaved=l.length>0&&l[0].date===window._pt.date&&l[0].entry===window._pt.entry&&l[0].type===window._pt.type;
+    if(!alreadySaved){
+      window._pt.note=el('noteInput').value;
+      l.unshift(window._pt);saveLog(l);
+      addLog('💾 บันทึกแล้ว','var(--green)','var(--green)');
+    } else {
+      // update note เท่านั้น
+      l[0].note=el('noteInput').value;saveLog(l);
+      addLog('📝 อัปเดต Note แล้ว','var(--cyan)','var(--cyan)');
+    }
+  }
+  closeAlert();resetTrade();}
 function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=false){
   el('baBox').className='babox '+cls;el('baIcon').textContent=icon;
   el('baTitle').textContent=title;el('baTitle').style.color=color;
