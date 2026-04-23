@@ -1580,35 +1580,39 @@ async function startTrade(){
   sendNotif('🚀 Trade',tradeDir.toUpperCase()+' $'+fmt(price)+' | '+fmtDur(customDurSecs));}
 
 // ════════════════════════════════════════
-// TIMER LOOP — ทำงานถูกต้องแม้ Tab ไม่ active
-// ใช้ 3 ชั้น: rAF (foreground) + setTimeout 1s (background) + visibilitychange (sync)
+// TIMER LOOP — ใช้ setInterval เดียว robust กว่า dual loop
 // ════════════════════════════════════════
 let _rafId=null,_timerTO=null,_lastTick=0;
+let _timerInterval=null;
 
 function startTimerLoop(){
-  // หยุด loop เก่า
-  if(_rafId){cancelAnimationFrame(_rafId);_rafId=null;}
-  if(_timerTO){clearTimeout(_timerTO);_timerTO=null;}
+  // หยุด loop เก่าทั้งหมด
+  stopTimerLoop();
   _lastTick=Date.now();
+  // ใช้ setInterval 500ms — ทำงานทั้ง foreground + background
+  _timerInterval=setInterval(()=>{
+    if(tradeFinished){stopTimerLoop();return;}
+    tickTimer();
+  },500);
+  // rAF เพิ่มเติมสำหรับ smooth display ตอน foreground
   timerRafLoop();
-  timerBgLoop(); // background fallback loop
 }
 
 function stopTimerLoop(){
   if(_rafId){cancelAnimationFrame(_rafId);_rafId=null;}
   if(_timerTO){clearTimeout(_timerTO);_timerTO=null;}
+  if(_timerInterval){clearInterval(_timerInterval);_timerInterval=null;}
 }
 
 // Foreground: requestAnimationFrame — smooth เมื่อ Tab active
 function timerRafLoop(){
   if(tradeFinished){stopTimerLoop();return;}
   const now=Date.now();
-  // อัปเดตทุก 250ms เพื่อไม่ให้ overload
   if(now-_lastTick>=250){_lastTick=now;tickTimer();}
   _rafId=requestAnimationFrame(timerRafLoop);
 }
 
-// Background: setTimeout 1s — ทำงานต่อเมื่อ Tab ไม่ active
+// Background: setTimeout 1s — fallback เมื่อ Tab ไม่ active
 function timerBgLoop(){
   if(tradeFinished)return;
   tickTimer();
@@ -1618,6 +1622,8 @@ function timerBgLoop(){
 // Timestamp-based tick — คำนวณจากเวลาจริงเสมอ
 function tickTimer(){
   if(tradeFinished)return;
+  // Guard: ถ้า tradeEndTime ยังไม่ set → skip
+  if(!tradeEndTime||tradeEndTime<=0)return;
   const remaining=Math.max(0,Math.floor((tradeEndTime-Date.now())/1000));
   const pct=customDurSecs>0?remaining/customDurSecs:0;
   const circ=314;
@@ -1642,12 +1648,11 @@ document.addEventListener('visibilitychange',async()=>{
     triggerResult('TIMEOUT');
     sendNotif('⏰ Trade หมดเวลา!','กลับมาดูผลได้เลย');
   }else{
-    tickTimer(); // update display ทันที
+    tickTimer();
     addLog('👁 Tab กลับมา — เหลือ '+fmtDur(remaining),'var(--yellow)');
     reqWakeLock();
-    // restart rAF loop
-    if(_rafId){cancelAnimationFrame(_rafId);_rafId=null;}
-    timerRafLoop();
+    // restart loop ทั้งหมด
+    startTimerLoop();
   }});
 
 // Trade PnL
