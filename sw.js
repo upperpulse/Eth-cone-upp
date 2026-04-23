@@ -1,46 +1,58 @@
-// ETH Cone v5.2 — Service Worker v3
-// Fix: TIMEOUT notification เมื่อปิด Tab
+// ETH Cone v5.2 — Service Worker v4
+// Fix: ใช้ fetch loop keep-alive ป้องกัน SW ถูก suspend
+// Android Chrome จะไม่ kill SW ระหว่างที่มี fetch request
 
 const BINANCE='https://fapi.binance.com/fapi/v1/ticker/price?symbol=ETHUSDT';
-const STORE='eth_cone_sw_state'; // cache key สำรอง
 
 self.addEventListener('install',()=>self.skipWaiting());
-self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 
-let _watchInterval=null;
-let _timeoutTimer=null;
-let _tradeState=null;
+self.addEventListener('activate',e=>e.waitUntil((async()=>{
+  await self.clients.claim();
+  // กู้คืน state หลัง SW restart
+  try{
+    const c=await caches.open('eth-sw-v4');
+    const r=await c.match('/sw-state');
+    if(r){
+      const s=await r.json();
+      if(s&&s.active&&s.endTime>Date.now()){
+        _state=s;
+        startLoop();
+      }
+    }
+  }catch{}
+})()));
 
-// ── รับ message จาก Tab ──
+let _loop=null;
+let _state=null;
+
+// ── Message handler ──
 self.addEventListener('message',e=>{
   if(!e.data)return;
   switch(e.data.type){
     case 'ALERT':
-      showNotif(e.data.title,e.data.body,e.data.tag||'eth');
+      notify(e.data.title,e.data.body,e.data.tag||'eth');
       break;
     case 'TRADE_START':
-      _tradeState=e.data.state;
-      // บันทึกลง Cache เผื่อ SW restart
-      saveSWState(_tradeState);
-      startWatchLoop();
-      startTimeoutTimer();
+      _state=e.data.state;
+      saveState(_state);
+      startLoop();
       break;
     case 'TRADE_STOP':
-      stopAll();
-      _tradeState=null;
-      clearSWState();
+      stopLoop();
+      _state=null;
+      clearState();
       break;
     case 'TRADE_UPDATE':
-      if(_tradeState){
-        Object.assign(_tradeState,e.data.state);
-        saveSWState(_tradeState);
-      }
+      if(_state){Object.assign(_state,e.data.state);saveState(_state);}
+      break;
+    case 'PING':
+      // keepalive from tab
       break;
   }
 });
 
 // ── Notification ──
-function showNotif(title,body,tag='eth'){
+function notify(title,body,tag='eth'){
   return self.registration.showNotification(title,{
     body,tag,renotify:true,
     vibrate:[300,100,300,100,300],
@@ -51,153 +63,129 @@ function showNotif(title,body,tag='eth'){
   });
 }
 
-// ── Stop everything ──
-function stopAll(){
-  if(_watchInterval){clearInterval(_watchInterval);_watchInterval=null;}
-  if(_timeoutTimer){clearTimeout(_timeoutTimer);_timeoutTimer=null;}
+// ── Main Loop ──
+// ใช้ recursive fetch แทน setTimeout/setInterval
+// fetch จะ keep SW alive บน Android Chrome
+function startLoop(){
+  stopLoop();
+  runLoop(); // เริ่มทันที
 }
 
-// ── TIMEOUT TIMER — แยก timer ตรงๆ ไม่พึ่ง interval ──
-// นี่คือ fix หลัก: ใช้ setTimeout ตรงๆ เมื่อรู้ endTime
-function startTimeoutTimer(){
-  if(_timeoutTimer){clearTimeout(_timeoutTimer);_timeoutTimer=null;}
-  if(!_tradeState||!_tradeState.endTime)return;
-  const remaining=_tradeState.endTime-Date.now();
-  if(remaining<=0){
-    handleTimeout();
-    return;
-  }
-  // ตั้ง timer ตรงๆ ณ เวลา endTime
-  _timeoutTimer=setTimeout(handleTimeout, remaining);
+function stopLoop(){
+  if(_loop){clearTimeout(_loop);_loop=null;}
 }
 
-async function handleTimeout(){
-  stopAll();
-  await showNotif(
-    '⏰ ETH Trade: TIMEOUT',
-    `หมดเวลา Monitoring\n${_tradeState?(_tradeState.dir||'').toUpperCase()+' Entry $'+parseFloat(_tradeState.entry||0).toFixed(2):''}`,
-    'eth-timeout'
-  );
-  broadcastToTabs({type:'SW_RESULT',result:'TIMEOUT',price:0});
-  _tradeState=null;
-  clearSWState();
-}
+async function runLoop(){
+  if(!_state||!_state.active){stopLoop();return;}
 
-// ── WATCH LOOP — ตรวจ TP/SL ทุก 15s ──
-function startWatchLoop(){
-  if(_watchInterval){clearInterval(_watchInterval);_watchInterval=null;}
-  // tick แรกทันที ไม่รอ 15s
-  watchTrade();
-  _watchInterval=setInterval(watchTrade,15000);
-}
-
-async function watchTrade(){
-  if(!_tradeState||!_tradeState.active)return;
-
-  // double-check timeout (กรณี SW restart แล้ว setTimeout หาย)
-  if(_tradeState.endTime&&Date.now()>=_tradeState.endTime){
-    handleTimeout();
-    return;
-  }
-
-  let price;
   try{
-    const r=await fetch(BINANCE);
-    const d=await r.json();
-    price=parseFloat(d.price);
-  }catch{return;}
+    await tick(); // fetch + check
+  }catch(err){
+    // network error — ลองใหม่
+  }
+
+  if(!_state||!_state.active){stopLoop();return;}
+
+  // รอ 20s แล้วรันใหม่ — setTimeout ใช้ได้เพราะ SW เพิ่ง fetch เสร็จ
+  // Chrome จะ keep SW alive อีก ~30s หลัง fetch
+  _loop=setTimeout(runLoop, 20000);
+}
+
+async function tick(){
+  if(!_state)return;
+  const now=Date.now();
+
+  // ── ตรวจ TIMEOUT ก่อน ──
+  if(_state.endTime&&now>=_state.endTime){
+    stopLoop();
+    const dir=(_state.dir||'').toUpperCase();
+    const entry=parseFloat(_state.entry||0).toFixed(2);
+    await notify(
+      `⏰ ETH ${dir}: TIMEOUT`,
+      `หมดเวลา Monitoring\nEntry $${entry}`,
+      'eth-timeout'
+    );
+    await broadcast({type:'SW_RESULT',result:'TIMEOUT',price:0});
+    _state=null;clearState();
+    return;
+  }
+
+  // ── Fetch ราคา — การ fetch นี้คือ keep-alive ของ SW ──
+  const r=await fetch(BINANCE,{cache:'no-store'});
+  const d=await r.json();
+  const price=parseFloat(d.price);
   if(!price)return;
 
-  const s=_tradeState;
+  const s=_state;
   const f=v=>parseFloat(v).toFixed(2);
-  const rem=s.endTime?Math.round((s.endTime-Date.now())/60000):'?';
+  const rem=s.endTime?Math.max(0,Math.round((s.endTime-now)/60000)):'?';
 
   if(s.dir==='long'){
     if(!s.tp1Hit&&price>=s.tp1){
-      s.tp1Hit=true;saveSWState(s);
-      await showNotif('🎯 LONG TP1 HIT!',`$${f(price)} ≥ TP1 $${f(s.tp1)} | เหลือ ${rem}m`,'eth-tp1');
-      broadcastToTabs({type:'SW_TP1_HIT',price});
+      s.tp1Hit=true;saveState(s);
+      await notify('🎯 LONG TP1 HIT!',`$${f(price)} ≥ TP1 $${f(s.tp1)} | เหลือ ${rem}m`,'eth-tp1');
+      await broadcast({type:'SW_TP1_HIT',price});
     }
     if(price>=s.tp2){
-      stopAll();
-      await showNotif('🏆 LONG TP2 WIN!',`$${f(price)} | +$${f((price-s.entry)*s.qty)}`,'eth-tp2');
-      broadcastToTabs({type:'SW_RESULT',result:'TP2',price});
-      _tradeState=null;clearSWState();return;
+      stopLoop();
+      const pnl=((price-s.entry)*s.qty).toFixed(2);
+      await notify('🏆 LONG TP2 WIN!',`$${f(price)} | +$${pnl}`,'eth-tp2');
+      await broadcast({type:'SW_RESULT',result:'TP2',price});
+      _state=null;clearState();return;
     }
     if(price<=s.sl){
-      stopAll();
-      await showNotif('🛑 LONG SL HIT',`$${f(price)} | -$${f((s.entry-price)*s.qty)}`,'eth-sl');
-      broadcastToTabs({type:'SW_RESULT',result:'SL',price});
-      _tradeState=null;clearSWState();return;
+      stopLoop();
+      const pnl=((s.entry-price)*s.qty).toFixed(2);
+      await notify('🛑 LONG SL HIT',`$${f(price)} | -$${pnl}`,'eth-sl');
+      await broadcast({type:'SW_RESULT',result:'SL',price});
+      _state=null;clearState();return;
     }
-  }else{
+  } else {
     if(!s.tp1Hit&&price<=s.tp1){
-      s.tp1Hit=true;saveSWState(s);
-      await showNotif('🎯 SHORT TP1 HIT!',`$${f(price)} ≤ TP1 $${f(s.tp1)} | เหลือ ${rem}m`,'eth-tp1');
-      broadcastToTabs({type:'SW_TP1_HIT',price});
+      s.tp1Hit=true;saveState(s);
+      await notify('🎯 SHORT TP1 HIT!',`$${f(price)} ≤ TP1 $${f(s.tp1)} | เหลือ ${rem}m`,'eth-tp1');
+      await broadcast({type:'SW_TP1_HIT',price});
     }
     if(price<=s.tp2){
-      stopAll();
-      await showNotif('🏆 SHORT TP2 WIN!',`$${f(price)} | +$${f((s.entry-price)*s.qty)}`,'eth-tp2');
-      broadcastToTabs({type:'SW_RESULT',result:'TP2',price});
-      _tradeState=null;clearSWState();return;
+      stopLoop();
+      const pnl=((s.entry-price)*s.qty).toFixed(2);
+      await notify('🏆 SHORT TP2 WIN!',`$${f(price)} | +$${pnl}`,'eth-tp2');
+      await broadcast({type:'SW_RESULT',result:'TP2',price});
+      _state=null;clearState();return;
     }
     if(price>=s.sl){
-      stopAll();
-      await showNotif('🛑 SHORT SL HIT',`$${f(price)} | -$${f((price-s.entry)*s.qty)}`,'eth-sl');
-      broadcastToTabs({type:'SW_RESULT',result:'SL',price});
-      _tradeState=null;clearSWState();return;
+      stopLoop();
+      const pnl=((price-s.entry)*s.qty).toFixed(2);
+      await notify('🛑 SHORT SL HIT',`$${f(price)} | -$${pnl}`,'eth-sl');
+      await broadcast({type:'SW_RESULT',result:'SL',price});
+      _state=null;clearState();return;
     }
   }
 }
 
 // ── Broadcast กลับ Tab ──
-async function broadcastToTabs(msg){
-  const all=await self.clients.matchAll({type:'window'});
-  all.forEach(c=>c.postMessage(msg));
-}
-
-// ── Cache state เผื่อ SW restart ──
-async function saveSWState(state){
+async function broadcast(msg){
   try{
-    const c=await caches.open('eth-sw-v3');
-    await c.put('/sw-state',new Response(JSON.stringify(state)));
+    const all=await self.clients.matchAll({type:'window',includeUncontrolled:true});
+    all.forEach(c=>c.postMessage(msg));
   }catch{}
 }
-async function clearSWState(){
-  try{const c=await caches.open('eth-sw-v3');await c.delete('/sw-state');}catch{}
+
+// ── Cache State ──
+async function saveState(s){
+  try{const c=await caches.open('eth-sw-v4');await c.put('/sw-state',new Response(JSON.stringify(s)));}catch{}
+}
+async function clearState(){
+  try{const c=await caches.open('eth-sw-v4');await c.delete('/sw-state');}catch{}
 }
 
-// ── SW restart: โหลด state กลับมา ──
-self.addEventListener('activate',e=>{
-  e.waitUntil((async()=>{
-    await self.clients.claim();
-    try{
-      const c=await caches.open('eth-sw-v3');
-      const r=await c.match('/sw-state');
-      if(r){
-        const state=await r.json();
-        if(state&&state.active&&state.endTime>Date.now()){
-          _tradeState=state;
-          startWatchLoop();
-          startTimeoutTimer();
-          console.log('[SW] Restored trade state after restart');
-        }
-      }
-    }catch{}
-  })());
-});
-
-// ── Notification click ──
+// ── Notification Click ──
 self.addEventListener('notificationclick',e=>{
   e.notification.close();
   e.waitUntil(
-    self.clients.matchAll({type:'window'}).then(cs=>{
+    self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{
       if(cs.length>0)return cs[0].focus();
       return self.clients.openWindow('/Eth-cone-upp/');
     })
   );
 });
-
-// ── PING handler — ป้องกัน SW ถูก suspend ──
-// (เพิ่มใน message listener ด้านบนไม่ได้เพราะใช้ cat append)
