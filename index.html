@@ -288,7 +288,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
       <div class="ctitle">🟢 LONG</div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP2</div><div class="clbar"><div class="clfill" style="background:var(--green);width:85%;opacity:.4;"></div><div class="clprice" style="color:var(--green);" id="lTP2">$—</div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--muted);">TP1</div><div class="clbar"><div class="clfill" style="background:var(--green);width:70%;opacity:.5;"></div><div class="clprice" style="color:var(--green);" id="lTP1">$—</div></div></div>
-      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar" id="lEntryBar"><div class="clfill" style="background:var(--yellow);width:38%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="lEntry">$—</div><div class="price-line" id="lPriceLine" style="left:50%;display:none;"><div class="price-line-tag" id="lPriceTag">$—</div></div></div></div></div>
+      <div class="clvl"><div class="cltag" style="color:var(--yellow);">ENTRY</div><div class="clbar" id="lEntryBar"><div class="clfill" style="background:var(--yellow);width:38%;opacity:.5;"></div><div class="clprice" style="color:var(--yellow);font-size:8px;" id="lEntry">$—</div><div class="price-line" id="lPriceLine" style="left:50%;display:none;"><div class="price-line-tag" id="lPriceTag">$—</div></div></div></div>
       <div class="clvl"><div class="cltag" style="color:var(--cyan);">SL</div><div class="clbar"><div class="clfill" style="background:var(--cyan);width:18%;opacity:.3;"></div><div class="clprice" style="color:var(--cyan);" id="lSL">$—</div></div></div>
       <div class="cbar-wrap"><div class="cbar-lbl"><span>CONFIDENCE</span><span id="lConf">—%</span><span id="lConfLive" style="font-size:8px;color:var(--yellow);margin-left:4px;font-family:'Share Tech Mono',monospace;"></span></div><div class="cbar-track"><div class="cbar-fill" id="lCBar" style="width:0%;background:var(--green);"></div></div></div>
       <div style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;">
@@ -503,6 +503,21 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
         <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;">
           <span style="font-size:9px;color:var(--muted);">เวลา Monitoring:</span>
           <span style="font-family:'Orbitron',monospace;font-size:14px;font-weight:700;color:var(--yellow);" id="durDisplay">01:00:00</span>
+        </div>
+      </div>
+
+      <!-- AUTO HOLD SUGGESTION -->
+      <div id="holdSuggestBox" style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:10px;display:none;">
+        <div style="font-size:8px;color:var(--muted);letter-spacing:2px;margin-bottom:6px;">🤖 AUTO HOLD SUGGESTION</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <div>
+            <div id="holdSuggestLabel" style="font-family:'Orbitron',monospace;font-size:13px;font-weight:700;color:var(--yellow);">—</div>
+            <div id="holdSuggestReason" style="font-size:9px;color:var(--muted);margin-top:2px;font-family:'Share Tech Mono',monospace;line-height:1.5;">—</div>
+          </div>
+          <button class="cbtn yw" id="holdSuggestApply" onclick="applyHoldSuggest()" style="padding:6px 12px;font-size:9px;white-space:nowrap;">✓ ใช้เวลานี้</button>
+        </div>
+        <div style="margin-top:6px;height:3px;background:var(--dim);border-radius:2px;overflow:hidden;">
+          <div id="holdConfBar" style="height:100%;border-radius:2px;transition:width .6s ease;background:var(--yellow);width:0%;"></div>
         </div>
       </div>
 
@@ -839,6 +854,7 @@ function sw(t){
   if(t==='history')renderHistory();
   if(t==='analytics')renderAnalytics();
   if(t==='multitf')fetchAllTF();
+  if(t==='trade')calcHoldSuggest();
 }
 
 // Log
@@ -1398,6 +1414,9 @@ function calcLiveConfAdj(price){
   const lbadge=el('lConfLive'),sbadge=el('sConfLive');
   if(lbadge)lbadge.textContent='⚡'+lc+'%';
   if(sbadge)sbadge.textContent='⚡'+sc+'%';
+
+  // Refresh hold suggestion ตาม live conf
+  calcHoldSuggest();
 }
 
 // Funding adjustment ทิศทาง — ดึงจาก global fundingRate
@@ -1440,8 +1459,64 @@ function setDur(secs){el('customWrap').style.display='none';document.querySelect
 function showCustomDur(){document.querySelectorAll('.durbtn').forEach(b=>b.classList.remove('sel'));el('dur-custom').classList.add('sel');el('customWrap').style.display='block';}
 function applyCustomDur(){const h=parseInt(el('inH').value)||0,m=parseInt(el('inM').value)||0,s=parseInt(el('inS').value)||0;const total=h*3600+m*60+s;if(total<10){alert('ขั้นต่ำ 10 วินาที');return;}customDurSecs=total;el('durDisplay').textContent=fmtDur(total);el('customWrap').style.display='none';el('dur-custom').textContent='✓ '+fmtDur(total);}
 function selTF(tf){document.querySelectorAll('.tfbtn').forEach(b=>b.classList.remove('sel'));el('tf-'+tf).classList.add('sel');tradeTF=tf;}
-function setDir(d){tradeDir=d;el('dirLong').classList.toggle('on',d==='long');el('dirShort').classList.toggle('on',d==='short');}
+function setDir(d){tradeDir=d;el('dirLong').classList.toggle('on',d==='long');el('dirShort').classList.toggle('on',d==='short');calcHoldSuggest();}
 function setSize(s){tradeSize=s;['sz100','sz500','sz1000'].forEach(id=>el(id).classList.remove('on'));const m={100:'sz100',500:'sz500',1000:'sz1000'};if(m[s])el(m[s]).classList.add('on');}
+
+// ═══════════════════════════════════════
+// AUTO HOLD TIME SUGGESTION
+// คำนวณ Hold Time ที่เหมาะสมจาก Confidence + Direction + MACD/OBV state
+// ═══════════════════════════════════════
+let _holdSuggestSecs=3600;
+
+function calcHoldSuggest(){
+  const box=el('holdSuggestBox');
+  if(!box)return;
+  const conf=tradeDir==='long'?C.lConf:C.sConf;
+  if(!conf||conf===0){box.style.display='none';return;}
+  box.style.display='block';
+
+  // ── Logic ──
+  let secs,label,reason,color,barPct;
+
+  if(conf>=90){
+    secs=7200;label='2H — GO Zone ✅';
+    reason='Confidence ≥90% · Signal แน่น · รอ TP2 ได้\nMACD+OBV aligned → Hold เต็ม';
+    color='var(--green)';barPct=100;
+  } else if(conf>=84){
+    secs=3600;label='1H — Conditional GO ⚠️';
+    reason='Confidence 84–89% · รอ MACD Cross confirm\nถ้า TP1 hit → ย้าย SL to Entry';
+    color='var(--yellow)';barPct=75;
+  } else if(conf>=75){
+    secs=1800;label='30m — Watch Zone 👀';
+    reason='Confidence 75–83% · Signal ยังไม่แน่น\nอย่า hold ข้าม session';
+    color='var(--orange)';barPct=50;
+  } else if(conf>=65){
+    secs=900;label='15m — Weak Signal ⚡';
+    reason='Confidence 65–74% · รอ reanalyze ใหม่\nถ้า entry แล้ว: cut loss เร็ว';
+    color='var(--orange)';barPct=30;
+  } else {
+    secs=300;label='5m — ❌ ไม่แนะนำ';
+    reason='Confidence <65% · MACD ยังไม่ Cross\nรอ Signal ดีกว่านี้';
+    color='var(--red)';barPct=10;
+  }
+
+  // แสดงผล
+  _holdSuggestSecs=secs;
+  const lb=el('holdSuggestLabel'),rs=el('holdSuggestReason'),cb=el('holdConfBar');
+  const ap=el('holdSuggestApply');
+  if(lb){lb.textContent=label;lb.style.color=color;}
+  if(rs)rs.textContent=reason;
+  if(cb){cb.style.width=barPct+'%';cb.style.background=color;}
+  if(ap){ap.style.borderColor=color;ap.style.color=color;}
+}
+
+function applyHoldSuggest(){
+  setDur(_holdSuggestSecs);
+  // Flash confirm
+  const lb=el('holdSuggestLabel');
+  if(lb){const orig=lb.textContent;lb.textContent='✅ Set: '+fmtDur(_holdSuggestSecs);setTimeout(()=>lb.textContent=orig,1500);}
+  addLog('🤖 Auto Hold: '+fmtDur(_holdSuggestSecs)+' (Conf:'+(tradeDir==='long'?C.lConf:C.sConf)+'%)','var(--yellow)');
+}
 
 // Start trade
 async function startTrade(){
