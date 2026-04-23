@@ -806,6 +806,37 @@ async function sendNotif(title,body,tag='eth'){
   }
 }
 
+// ── ส่งคำสั่งไปยัง SW ──────────────────────
+function swSend(msg){
+  if(!_swReg)return;
+  try{
+    const sw=_swReg.active||_swReg.waiting;
+    if(sw)sw.postMessage(msg);
+  }catch{}
+}
+function swSendTradeStart(state){swSend({type:'TRADE_START',state});}
+function swSendTradeStop(){swSend({type:'TRADE_STOP'});}
+function swSendUpdate(state){swSend({type:'TRADE_UPDATE',state});}
+
+// ── รับผลจาก SW กลับมาเมื่อ Tab เปิดอีกครั้ง ──
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message', e=>{
+    if(!e.data)return;
+    if(e.data.type==='SW_TP1_HIT'){
+      tp1Hit=true;
+      addLog('🎯 SW: TP1 Hit ขณะปิด Tab! $'+fmt(e.data.price),'var(--yellow)','var(--yellow)');
+    }
+    if(e.data.type==='SW_RESULT'){
+      // SW ตรวจเจอ TP2/SL ขณะปิด Tab → ถ้า trade ยัง active ให้ trigger ผล
+      if(tradeActive&&!tradeFinished){
+        curPrice=e.data.price;
+        triggerResult(e.data.result);
+        addLog('📲 SW Background Result: '+e.data.result+' $'+fmt(e.data.price),'var(--cyan)','var(--cyan)');
+      }
+    }
+  });
+}
+
 // Wake Lock
 async function reqWakeLock(){
   if(!('wakeLock' in navigator))return;
@@ -1537,6 +1568,14 @@ async function startTrade(){
   
   startTimerLoop();
   reqWakeLock();
+  // ── บอก SW ให้ watch ราคาเองแม้ปิด Tab ──
+  swSendTradeStart({
+    active:true,dir:tradeDir,
+    entry:tradeEntry,tp1:tradeTP1,tp2:tradeTP2,sl:tradeSL,
+    qty:tradeQty,endTime:tradeEndTime,tp1Hit:false,
+    shortLow:C.shortLow,shortHigh:C.shortHigh,
+    longLow:C.longLow,longHigh:C.longHigh
+  });
   addLog(`🚀 ${tradeDir.toUpperCase()} TF:${TF_LBL[tradeTF]} $${tradeSize} Entry:$${fmt(price)} Dur:${fmtDur(customDurSecs)}`,'var(--cyan)','var(--cyan)');
   sendNotif('🚀 Trade',tradeDir.toUpperCase()+' $'+fmt(price)+' | '+fmtDur(customDurSecs));}
 
@@ -1627,17 +1666,17 @@ function updateTrade(price){
   drawSpark('tsArea','tsLine',tradePriceHist);
   if(tradeDir==='long'){
     if(price>=tradeTP2){triggerResult('TP2');return;}
-    if(price>=tradeTP1&&!tp1Hit){tp1Hit=true;addLog('🎯 TP1 Hit!','var(--yellow)','var(--yellow)');}
+    if(price>=tradeTP1&&!tp1Hit){tp1Hit=true;swSendUpdate({tp1Hit:true});addLog('🎯 TP1 Hit!','var(--yellow)','var(--yellow)');}
     if(price<=tradeSL){triggerResult('SL');return;}
   }else{
     if(price<=tradeTP2){triggerResult('TP2');return;}
-    if(price<=tradeTP1&&!tp1Hit){tp1Hit=true;addLog('🎯 TP1 Hit!','var(--yellow)','var(--yellow)');}
+    if(price<=tradeTP1&&!tp1Hit){tp1Hit=true;swSendUpdate({tp1Hit:true});addLog('🎯 TP1 Hit!','var(--yellow)','var(--yellow)');}
     if(price>=tradeSL){triggerResult('SL');return;}
   }}
-function cancelTrade(){if(tradeActive){stopTimerLoop();relWakeLock();triggerResult('MANUAL');}}
+function cancelTrade(){if(tradeActive){stopTimerLoop();relWakeLock();swSendTradeStop();triggerResult('MANUAL');}}
 function triggerResult(type){
   if(tradeFinished)return;tradeFinished=true;tradeActive=false;
-  stopTimerLoop();relWakeLock();
+  stopTimerLoop();relWakeLock();swSendTradeStop();
   const price=curPrice||tradeEntry;
   const diff=tradeDir==='long'?price-tradeEntry:tradeEntry-price;
   const pnl=diff*tradeQty,pct=(diff/tradeEntry)*100;
