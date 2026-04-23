@@ -226,9 +226,9 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   <span>🔔 เปิด Notification เพื่อรับแจ้งเตือนแม้ปิด Tab</span>
   <button class="cbtn yw" onclick="requestNotif()" style="padding:3px 10px;font-size:8px;">เปิดอนุญาต</button>
 </div>
-<div class="notif-banner" id="pwaBanner" style="display:none;border-color:rgba(0,212,255,.25);background:rgba(0,212,255,.06);">
-  <span>📲 Install เป็น App เพื่อรับ Notification ตอนปิด Tab ได้ 100%</span>
-  <button class="cbtn cy" onclick="installPWA()" style="padding:3px 10px;font-size:8px;">ติดตั้ง</button>
+<div class="notif-banner" id="pwaBanner" style="border-color:rgba(0,212,255,.25);background:rgba(0,212,255,.06);">
+  <span>📲 <b>Add to Home Screen</b> เพื่อรับ Notification ตอนปิด Tab</span>
+  <button class="cbtn cy" onclick="showInstallGuide()" style="padding:3px 10px;font-size:8px;">วิธีติดตั้ง</button>
 </div>
 
 <div class="ctrl-bar">
@@ -830,25 +830,48 @@ function stopKeepAlive(){
   if(_keepAliveInterval){clearInterval(_keepAliveInterval);_keepAliveInterval=null;}
 }
 
-// ── PWA Install Prompt ──
+// ── PWA Install ──
 let _pwaPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{
   e.preventDefault();_pwaPrompt=e;
-  const b=el('pwaBanner');if(b)b.style.display='flex';
+  // ถ้า Chrome support auto prompt → ให้ใช้ได้
 });
 async function installPWA(){
-  if(!_pwaPrompt)return;
-  _pwaPrompt.prompt();
-  const r=await _pwaPrompt.userChoice;
-  if(r.outcome==='accepted'){
-    const b=el('pwaBanner');if(b)b.style.display='none';
-    addLog('✅ ติดตั้ง PWA สำเร็จ — Notification จะทำงาน background ได้','var(--green)','var(--green)');
+  if(_pwaPrompt){
+    _pwaPrompt.prompt();
+    const r=await _pwaPrompt.userChoice;
+    if(r.outcome==='accepted'){
+      addLog('✅ ติดตั้ง PWA สำเร็จ','var(--green)','var(--green)');
+      el('pwaBanner').style.display='none';
+    }
+    _pwaPrompt=null;return;
   }
-  _pwaPrompt=null;
+  showInstallGuide();
+}
+function showInstallGuide(){
+  // ตรวจว่าติดตั้งแล้วหรือยัง
+  const isInstalled=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone;
+  if(isInstalled){
+    showAlert('info','✅','ติดตั้งแล้ว!',0,
+      'ETH Cone ทำงานเป็น PWA แล้ว\nNotification background พร้อมใช้งาน',
+      'var(--green)',[{lbl:'✓ โอเค',cls:'var(--green)',fn:'closeAlert()'}]);
+    el('pwaBanner').style.display='none';
+    return;
+  }
+  // แสดง guide แบบ step-by-step
+  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  const guide=isIOS
+    ?'iOS Safari:\n1. กด Share icon (□↑) ด้านล่าง\n2. เลือก "Add to Home Screen"\n3. กด Add\n\n✅ แล้วเปิดจาก Home Screen'
+    :'Android Chrome:\n1. กด ⋮ (สามจุด) มุมขวาบน\n2. เลือก "Add to Home screen"\n   หรือ "Install app"\n3. กด Install / Add\n\n✅ แล้วเปิดจาก Home Screen\nNotification จะทำงาน background ได้';
+  showAlert('info','📲','วิธีติดตั้ง ETH Cone',0,guide,
+    'var(--cyan)',[
+      {lbl:'✓ เข้าใจแล้ว',cls:'var(--cyan)',fn:'closeAlert()'},
+      {lbl:'🔔 เปิด Notification',cls:'var(--yellow)',fn:'requestNotif();closeAlert();'}
+    ]);
 }
 window.addEventListener('appinstalled',()=>{
-  const b=el('pwaBanner');if(b)b.style.display='none';
-  addLog('✅ ETH Cone ติดตั้งเป็น App แล้ว','var(--green)','var(--green)');
+  el('pwaBanner').style.display='none';
+  addLog('✅ ETH Cone ติดตั้งเป็น App แล้ว — Background Notification พร้อม','var(--green)','var(--green)');
 });
 
 // ── ส่งคำสั่งไปยัง SW ──────────────────────
@@ -1808,6 +1831,10 @@ setInterval(()=>{el('thaiClock').textContent='🇹🇭 '+thaiTime();},1000);
 // Init
 document.addEventListener('click',()=>{const c=getCtx();if(c&&c.state==='suspended')c.resume();},{once:true});
 if('Notification' in window&&Notification.permission==='granted'){notifGranted=true;el('notifBanner').classList.add('gone');el('btnNotif').textContent='✅ Notification On';registerSW();}
+// ซ่อน PWA banner ถ้าติดตั้งแล้ว
+if(window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone){
+  const b=el('pwaBanner');if(b)b.style.display='none';
+}
 setDir('long');setSize(100);selTF('1h');setDur(3600);
 reanalyze();
 setInterval(tickRef,1000);
