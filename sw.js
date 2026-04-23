@@ -198,3 +198,6 @@ self.addEventListener('notificationclick',e=>{
     })
   );
 });
+
+// ── PING handler — ป้องกัน SW ถูก suspend ──
+// (เพิ่มใน message listener ด้านบนไม่ได้เพราะใช้ cat append)
