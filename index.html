@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.3 — nattajoe</title>
+<title>ETH Cone v5.4 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -162,6 +162,14 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 /* ML BAR */
 .mlbar{height:4px;background:var(--dim);border-radius:2px;overflow:hidden;margin-top:4px;}
 .mlf{height:100%;border-radius:2px;transition:width .8s ease;}
+.trig-row{display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:4px;margin-bottom:4px;background:var(--dim);border-left:3px solid transparent;transition:all .3s;}
+.trig-row.pass{background:rgba(0,255,157,.08);border-left-color:var(--green);}
+.trig-row.fail{background:rgba(255,59,59,.06);border-left-color:var(--red);}
+.trig-icon{font-size:16px;min-width:22px;text-align:center;}
+.trig-body{flex:1;min-width:0;}
+.trig-name{font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:2px;}
+.trig-val{font-size:10px;font-family:'Share Tech Mono',monospace;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.trig-weight{font-size:10px;opacity:.4;white-space:nowrap;}
 /* OVERLAY */
 .big-alert{display:none;position:fixed;inset:0;z-index:500;background:rgba(2,8,15,.93);align-items:center;justify-content:center;backdrop-filter:blur(10px);}
 .big-alert.show{display:flex;animation:ain .3s ease;}
@@ -213,7 +221,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.3</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.4</span></div>
     <div class="brand-sub">OBV15 · RSI30 · NORM.CONF · BTC · F&G·6H · BACKTEST L+S · CSV · nattajoe</div>
   </div>
   <div class="hdr-right">
@@ -346,58 +354,100 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <!-- TRIGGER -->
 <div class="tab-content" id="tab-trigger">
-  <div class="grid2">
-    <div class="card yw">
-      <div class="ctitle">⚡ TRIGGER DASHBOARD</div>
-      <div class="srow"><span class="sk">✅ MACD (1H)</span><span class="sv" id="tMacd">—</span></div>
-      <div class="srow"><span class="sk">✅ MA Stack / µ Slope</span><span class="sv" id="tSlope">—</span></div>
-      <div class="srow"><span class="sk">✅ OBV Tick</span><span class="sv" id="tObv">—</span></div>
-      <div class="srow"><span class="sk">⚠️ Trap Detect</span><span class="sv" id="tTrap">—</span></div>
-      <div class="srow"><span class="sk">🤖 ML SpikeProb</span><span class="sv" id="tML">—</span></div>
-      <div class="srow"><span class="sk">📊 BreakoutScore</span><span class="sv" id="tBrk">—</span></div>
-      <div class="srow"><span class="sk">🌊 PreBurst</span><span class="sv" id="tBurst">—</span></div>
-      <div class="srow"><span class="sk">💧 Vol-Liq Trap</span><span class="sv" id="tVLT">—</span></div>
-      <div class="srow"><span class="sk">Funding Rate</span><span class="sv" id="tFund">—</span></div>
-      <div class="srow"><span class="sk">📊 Funding Adj + BTC</span><span class="sv" id="tFundAdj">—</span></div>
-      <div class="srow"><span class="sk">😨 Fear & Greed</span><span class="sv" id="tFG">— กำลังโหลด...</span></div>
+
+  <!-- 5 CORE TRIGGERS -->
+  <div class="card yw">
+    <div class="ctitle">⚡ CORE TRIGGERS — <span id="trigScore" style="color:var(--yellow);">0/5</span> <span id="trigVerdict" style="font-size:9px;color:var(--muted);letter-spacing:2px;">WAIT</span></div>
+
+    <div class="trig-row" id="tr-macd">
+      <div class="trig-icon" id="tri-macd">⬜</div>
+      <div class="trig-body">
+        <div class="trig-name">MACD 1H</div>
+        <div class="trig-val" id="tMacd">—</div>
+      </div>
+      <div class="trig-weight">⭐⭐⭐</div>
     </div>
-    <div class="card cy">
-      <div class="ctitle">🧠 SMART ENTRY DELAY</div>
-      <div class="srow"><span class="sk">MACD Cross</span><span class="sv" id="sedMacd">—</span></div>
-      <div class="srow"><span class="sk">OBV State</span><span class="sv" id="sedObv">—</span></div>
-      <div class="srow"><span class="sk">Momentum</span><span class="sv" id="sedMom">—</span></div>
-      <div class="srow"><span class="sk">Signal</span><span class="sv" id="sedSig" style="font-size:11px;font-weight:700;">—</span></div>
-      <div style="margin-top:10px;padding:8px;border-radius:3px;text-align:center;font-size:10px;letter-spacing:2px;border:1px solid var(--muted);color:var(--muted);" id="sedVerdict">WAITING FOR DATA</div>
-      <div style="font-size:8px;color:var(--muted);margin-top:6px;font-family:'Share Tech Mono',monospace;padding:4px 6px;background:var(--dim);border-radius:2px;" id="confDebug">Conf: —</div>
+
+    <div class="trig-row" id="tr-obv">
+      <div class="trig-icon" id="tri-obv">⬜</div>
+      <div class="trig-body">
+        <div class="trig-name">OBV Direction</div>
+        <div class="trig-val" id="tObv">—</div>
+      </div>
+      <div class="trig-weight">⭐⭐⭐</div>
+    </div>
+
+    <div class="trig-row" id="tr-btc">
+      <div class="trig-icon" id="tri-btc">⬜</div>
+      <div class="trig-body">
+        <div class="trig-name">BTC Bias</div>
+        <div class="trig-val" id="tBtc">—</div>
+      </div>
+      <div class="trig-weight">⭐⭐⭐</div>
+    </div>
+
+    <div class="trig-row" id="tr-trap">
+      <div class="trig-icon" id="tri-trap">⬜</div>
+      <div class="trig-body">
+        <div class="trig-name">Trap Clear</div>
+        <div class="trig-val" id="tTrap">—</div>
+      </div>
+      <div class="trig-weight">⭐⭐⭐</div>
+    </div>
+
+    <div class="trig-row" id="tr-fg">
+      <div class="trig-icon" id="tri-fg">⬜</div>
+      <div class="trig-body">
+        <div class="trig-name">Fear &amp; Greed</div>
+        <div class="trig-val" id="tFG">—</div>
+      </div>
+      <div class="trig-weight">⭐⭐</div>
+    </div>
+
+    <!-- GO/NOGO BAR -->
+    <div style="margin-top:12px;">
+      <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-bottom:4px;letter-spacing:2px;">
+        <span>TRIGGER SCORE</span><span id="trigPct">0%</span>
+      </div>
+      <div style="height:6px;background:var(--dim);border-radius:3px;overflow:hidden;">
+        <div id="trigBar" style="height:100%;border-radius:3px;transition:width .4s,background .4s;width:0%;background:var(--red);"></div>
+      </div>
+      <div id="trigGO" style="margin-top:10px;padding:10px;border-radius:4px;text-align:center;font-family:'Orbitron',monospace;font-size:13px;font-weight:700;letter-spacing:3px;border:1px solid var(--muted);color:var(--muted);">WAITING FOR DATA</div>
     </div>
   </div>
-  <div class="card or">
-    <div class="ctitle">🤖 ML SPIKE DETECTOR + BREAKOUT RANKER</div>
-    <div class="grid2" style="margin-bottom:0;">
-      <div>
-        <div style="font-size:9px;color:var(--muted);margin-bottom:6px;letter-spacing:2px;">ML SPIKE DETECTOR</div>
-        <div class="srow"><span class="sk">Volume Δ</span><span class="sv" id="mlVol">—</span></div>
-        <div class="srow"><span class="sk">OBV Signal</span><span class="sv" id="mlOBV">—</span></div>
-        <div class="srow"><span class="sk">µ Slope</span><span class="sv" id="mlSlope">—</span></div>
-        <div style="margin-top:8px;">
-          <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:3px;"><span>SpikeProb</span><span id="mlProbVal">—</span></div>
-          <div class="mlbar"><div class="mlf" id="mlProbBar" style="width:0%;background:var(--orange);"></div></div>
-          <div style="font-size:9px;margin-top:4px;" id="mlResult">MLSpikeTrigger: —</div>
-        </div>
-      </div>
-      <div>
-        <div style="font-size:9px;color:var(--muted);margin-bottom:6px;letter-spacing:2px;">BREAKOUT RANKER</div>
-        <div class="srow"><span class="sk">µ Break %</span><span class="sv" id="brMu">—</span></div>
-        <div class="srow"><span class="sk">OBV Divergence</span><span class="sv" id="brOBV">—</span></div>
-        <div class="srow"><span class="sk">Vol Z-Score</span><span class="sv" id="brVZ">—</span></div>
-        <div style="margin-top:8px;">
-          <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:3px;"><span>BreakoutScore</span><span id="brScoreVal">—</span></div>
-          <div class="mlbar"><div class="mlf" id="brScoreBar" style="width:0%;background:var(--cyan);"></div></div>
-          <div style="font-size:9px;margin-top:4px;" id="brResult">StatBreakoutTrigger: —</div>
-        </div>
-      </div>
-    </div>
+
+  <!-- SMART ENTRY DELAY (compact) -->
+  <div class="card cy">
+    <div class="ctitle">🧠 SMART ENTRY DELAY</div>
+    <div class="srow"><span class="sk">MACD Cross</span><span class="sv" id="sedMacd">—</span></div>
+    <div class="srow"><span class="sk">OBV State</span><span class="sv" id="sedObv">—</span></div>
+    <div class="srow"><span class="sk">Momentum</span><span class="sv" id="sedMom">—</span></div>
+    <div class="srow"><span class="sk">Signal</span><span class="sv" id="sedSig" style="font-size:11px;font-weight:700;">—</span></div>
+    <div style="margin-top:10px;padding:8px;border-radius:3px;text-align:center;font-size:10px;letter-spacing:2px;border:1px solid var(--muted);color:var(--muted);" id="sedVerdict">WAITING FOR DATA</div>
+    <div style="font-size:8px;color:var(--muted);margin-top:6px;font-family:'Share Tech Mono',monospace;padding:4px 6px;background:var(--dim);border-radius:2px;" id="confDebug">Conf: —</div>
   </div>
+
+  <!-- hidden IDs ที่ JS ยังอ้างอิง (display:none) -->
+  <span id="tSlope" style="display:none"></span>
+  <span id="tML" style="display:none"></span>
+  <span id="tBrk" style="display:none"></span>
+  <span id="tBurst" style="display:none"></span>
+  <span id="tVLT" style="display:none"></span>
+  <span id="tFund" style="display:none"></span>
+  <span id="tFundAdj" style="display:none"></span>
+  <span id="mlVol" style="display:none"></span>
+  <span id="mlOBV" style="display:none"></span>
+  <span id="mlSlope" style="display:none"></span>
+  <span id="mlProbVal" style="display:none"></span>
+  <span id="mlProbBar" style="display:none"></span>
+  <span id="mlResult" style="display:none"></span>
+  <span id="brMu" style="display:none"></span>
+  <span id="brOBV" style="display:none"></span>
+  <span id="brVZ" style="display:none"></span>
+  <span id="brScoreVal" style="display:none"></span>
+  <span id="brScoreBar" style="display:none"></span>
+  <span id="brResult" style="display:none"></span>
+</div>
 </div>
 
 <!-- ALERTS -->
@@ -651,7 +701,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.3 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.4 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -680,7 +730,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.2 — nattajoe
+// ETH CONE ULTIMATE v5.4 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
@@ -942,7 +992,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.2 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.4 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1120,7 +1170,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.2
+// BASELINE ENGINE v5.4
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1313,35 +1363,77 @@ el('sTP2').textContent='$'+fmt(C.sTP2);el('sTP1').textContent='$'+fmt(C.sTP1);
 
 // ─── UPDATE TRIGGER UI ───
 function updateTriggerUI(d){
-  setTV('tMacd',d.macd1h.positive?'BULL HIST ▲':'BEAR HIST ▼'+(d.macd1h.cross?' 🔀CROSS!':''),d.macd1h.positive?'var(--green)':'var(--red)');
-  setTV('tSlope',(d.maStackBull?'MA Stack BULL':'No Stack')+' µ:'+(d.muSlopePos?'↑':'↓'),d.muSlopePos?'var(--green)':'var(--red)');
-  setTV('tObv','Real OBV: '+d.realOBV.trend+' Slope:'+d.realOBV.slope.toFixed(1)+'%'+(d.obvDivergence?' ⚠️Div':''),d.obvPos?'var(--green)':'var(--red)');
-  setTV('tTrap',d.trapAlert?'⛔ TRAP DETECTED':'✅ TrapProb '+d.trapProb.toFixed(2),d.trapAlert?'var(--red)':'var(--green)');
-  setTV('tML','SpikeProb: '+d.spikeProb.toFixed(3)+(d.mlTrigger?' ✅':' ❌'),d.mlTrigger?'var(--green)':'var(--red)');
-  setTV('tBrk','Score: '+d.bScore.toFixed(0)+(d.statTrig?' ✅':' ❌'),d.statTrig?'var(--green)':'var(--red)');
-  setTV('tBurst',d.preburst,d.preburst.includes('LONG ACTIVE')?'var(--green)':d.preburst.includes('SHORT ACTIVE')?'var(--red)':d.preburst.includes('LONG')?'var(--yellow)':'var(--orange)');
-  setTV('tVLT','TrapProb: '+d.trapProb.toFixed(2)+(d.trapAlert?' → NOGO':' → OK'),d.trapAlert?'var(--red)':'var(--green)');
-  // FIX 1: แสดง Funding Rate จาก state variable
-  const frColor=d.fundingRate<-0.01?'var(--green)':d.fundingRate>0.01?'var(--red)':'var(--muted)';
-  setTV('tFund',(d.fundingRate>0?'+':'')+d.fundingRate.toFixed(4)+'% (Adj:'+(d.fundAdj>0?'+':'')+d.fundAdj+'%)',frColor);
-  setTV('tFundAdj','Conf Adj: '+(d.fundAdj>0?'+':'')+d.fundAdj+'% | BTC MACD: '+(d.btcMacdPos?'🟢 Bull':'🔴 Bear'),d.btcBullish?'var(--green)':'var(--red)');
+  // ── helper: set row pass/fail ──
+  function setTrig(id,iconId,pass,valText,valColor){
+    const row=el(id),icon=el(iconId),val=el(id.replace('tr-','t').replace('tr-btc','tBtc'));
+    if(!row)return;
+    row.className='trig-row '+(pass?'pass':'fail');
+    if(icon)icon.textContent=pass?'✅':'❌';
+    if(val){val.textContent=valText;val.style.color=valColor||(pass?'var(--green)':'var(--red)');}
+  }
+
+  // ── ตรวจ 5 Trigger ──
+  const p1=d.macd1h.positive;   // MACD
+  const p2=d.obvPos&&d.realOBV.slope>0; // OBV
+  const p3=d.btcBullish!=null;  // BTC Bias — neutral OK
+  const btcPass=d.btcBullish;
+  const p4=!d.trapAlert;        // Trap Clear
+  // Fear & Greed: pass ถ้าไม่ Extreme ฝั่งตรงข้าม (0-25 extreme fear=LONG ok, 75-100 extreme greed=SHORT ok)
+  const fg=parseInt(el('tFG').textContent)||50;
+  const p5=fg>20&&fg<80;        // ไม่ Extreme
+
+  setTrig('tr-macd','tri-macd',p1,
+    d.macd1h.positive?'BULL ▲'+(d.macd1h.cross?' 🔀CROSS':''):'BEAR ▼'+(d.macd1h.cross?' 🔀CROSS':''));
+  setTrig('tr-obv','tri-obv',p2,
+    d.realOBV.trend+' Slope:'+(d.realOBV.slope>0?'+':'')+d.realOBV.slope.toFixed(1)+'%'+(d.obvDivergence?' ⚠️Div':''));
+  setTrig('tr-btc','tri-btc',btcPass,
+    (d.btcBullish?'🟢 BULL':'🔴 BEAR')+' MACD:'+(d.btcMacdPos?'↑':'↓'));
+  setTrig('tr-trap','tri-trap',p4,
+    d.trapAlert?'⛔ TRAP — งดเทรด':'✅ Clear ('+d.trapProb.toFixed(2)+')');
+
+  // Fear & Greed — อัปเดตใน updateTriggerUI ด้วย
+  const fgEl=el('tFG');
+  if(fgEl&&fgEl.textContent&&!fgEl.textContent.includes('กำลัง')){
+    const fgVal=parseInt(fgEl.textContent)||50;
+    const fgPass=fgVal>20&&fgVal<80;
+    const fgRow=el('tr-fg'),fgIcon=el('tri-fg');
+    if(fgRow)fgRow.className='trig-row '+(fgPass?'pass':'fail');
+    if(fgIcon)fgIcon.textContent=fgPass?'✅':'❌';
+  }
+
+  // ── Score ──
+  const passed=[p1,p2,btcPass,p4,p5].filter(Boolean).length;
+  const pct=Math.round(passed/5*100);
+  el('trigScore').textContent=passed+'/5';
+  const bar=el('trigBar');
+  if(bar){bar.style.width=pct+'%';bar.style.background=passed>=4?'var(--green)':passed>=3?'var(--yellow)':'var(--red)';}
+  el('trigPct').textContent=pct+'%';
+
+  // ── GO/NOGO verdict ──
+  const goEl=el('trigGO');
+  if(goEl){
+    if(passed>=4){
+      goEl.textContent='✅ GO — '+passed+'/5 TRIGGERS PASS';
+      goEl.style.background='rgba(0,255,157,.1)';goEl.style.borderColor='var(--green)';goEl.style.color='var(--green)';
+    } else if(passed===3){
+      goEl.textContent='⚠️ CONDITIONAL — '+passed+'/5 รอ Confirm';
+      goEl.style.background='rgba(255,214,0,.06)';goEl.style.borderColor='var(--yellow)';goEl.style.color='var(--yellow)';
+    } else {
+      goEl.textContent='❌ NOGO — '+passed+'/5 ยังไม่พร้อม';
+      goEl.style.background='rgba(255,59,59,.06)';goEl.style.borderColor='var(--red)';goEl.style.color='var(--red)';
+    }
+    el('trigScore').style.color=passed>=4?'var(--green)':passed>=3?'var(--yellow)':'var(--red)';
+    el('trigVerdict').textContent=passed>=4?'GO':passed>=3?'CONDITIONAL':'NOGO';
+    el('trigVerdict').style.color=passed>=4?'var(--green)':passed>=3?'var(--yellow)':'var(--red)';
+  }
+
+  // ── Smart Entry Delay ──
   setTV('sedMacd',d.macdReady?'✅ Ready'+(d.macd1h.cross?' 🔀':''):'⏳ ยังไม่ Cross',d.macdReady?'var(--green)':'var(--yellow)');
-  setTV('sedObv',d.obvPos&&d.realOBV.slope>0?'✅ Slope+('+d.realOBV.slope.toFixed(1)+'%)':'⏳ Slope-',d.obvPos&&d.realOBV.slope>0?'var(--green)':'var(--yellow)');
+  setTV('sedObv',p2?'✅ Slope+('+d.realOBV.slope.toFixed(1)+'%)':'⏳ Slope-',p2?'var(--green)':'var(--yellow)');
   setTV('sedMom',d.maStack?'✅ Active':'⏳ Weak',d.maStack?'var(--green)':'var(--yellow)');
   const se=el('sedSig');if(se){se.textContent=d.entrySig;se.style.color=d.entrySig==='GO'?'var(--green)':d.entrySig.includes('HOLD')||d.entrySig.includes('SOFT')?'var(--yellow)':'var(--red)';}
   const sv=el('sedVerdict');if(sv){sv.textContent=d.entrySig==='GO'?'✅ MOMENTUM CONFIRMED':'⏳ '+d.entrySig;sv.style.borderColor=d.entrySig==='GO'?'var(--green)':'var(--muted)';sv.style.color=d.entrySig==='GO'?'var(--green)':'var(--muted)';}
-  setTV('mlVol','Vol Z: '+d.volZ.toFixed(2),Math.abs(d.volZ)>.5?'var(--yellow)':'var(--muted)');
-  setTV('mlOBV','Real OBV: '+d.realOBV.trend+' ('+d.realOBV.slope.toFixed(1)+'%)',d.realOBV.pos?'var(--green)':'var(--red)');
-  setTV('mlSlope',d.muSlopePos?'Positive ↑':'Negative ↓',d.muSlopePos?'var(--green)':'var(--red)');
-  el('mlProbVal').textContent=d.spikeProb.toFixed(3);el('mlProbBar').style.width=(d.spikeProb*100)+'%';el('mlProbBar').style.background=d.mlTrigger?'var(--green)':'var(--orange)';
-  el('mlResult').textContent='MLSpikeTrigger: '+(d.mlTrigger?'✅ TRUE':'❌ FALSE')+' | RSI:'+d.rsi.toFixed(1)+(d.rsiOversold?' 📉OS':d.rsiOverbought?' 📈OB':'');el('mlResult').style.color=d.mlTrigger?'var(--green)':'var(--red)';
-  setTV('brMu',fmt(Math.abs(d.price-C.muEntry),0)+' / '+(Math.abs(d.price-C.muEntry)/C.muEntry*100).toFixed(2)+'%');
-  setTV('brOBV',d.obvDivergence?'⚠️ DIVERGING (15-candle)':'✅ Aligned',d.obvDivergence?'var(--red)':'var(--green)');
-  setTV('brVZ',d.volZ.toFixed(2),Math.abs(d.volZ)>1?'var(--orange)':'var(--muted)');
-  el('brScoreVal').textContent=d.bScore.toFixed(0)+'/100';el('brScoreBar').style.width=d.bScore+'%';el('brScoreBar').style.background=d.statTrig?'var(--green)':'var(--cyan)';
-  el('brResult').textContent='StatBreakoutTrigger: '+(d.statTrig?'✅ TRUE':'❌ FALSE');el('brResult').style.color=d.statTrig?'var(--green)':'var(--red)';
-  // FIX 3: แสดง Normalized Confidence raw scores
-  const confDebug=el('confDebug');if(confDebug)confDebug.textContent=`L raw:${d.lRaw}/${LCONF_MAX}=${d.lConf}% | S raw:${d.sRaw}/${SCONF_MAX}=${d.sConf}%`;
+  const confDebug=el('confDebug');if(confDebug)confDebug.textContent=`L:${d.lConf}% S:${d.sConf}% | Trig:${passed}/5`;
 }
 
 // Go/NoGo
@@ -1365,6 +1457,7 @@ async function update(){
     el('markEl').textContent='$'+fmt(parseFloat(fund.markPrice));
   }
   updateAlerts(price);checkAlerts(price);updatePriceLines(price);calcLiveConfAdj(price);
+  updateTriggerRealtime(price);
   priceHist.push(price);if(priceHist.length>120)priceHist.shift();
   drawSpark('spArea','spLine',priceHist);
   if(tradeActive)updateTrade(price);
@@ -1389,7 +1482,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.2 Ready',p:100}];
+    {t:'✅ Baseline v5.4 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   const [k1h,k4h,k1d,kBTC,fg,bt]=await Promise.all([
     fetchKlines('1h',120),fetchKlines('4h',80),fetchKlines('1d',40),
@@ -1403,8 +1496,8 @@ async function reanalyze(){
   if(btEl)btEl.textContent=`1H Long:${(bt.ratioL*100).toFixed(0)}% Short:${(bt.ratioS*100).toFixed(0)}% Score:${bt.score}/100`;
   await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
   await update();ov.classList.remove('show');
-  addLog(`🔄 v5.2 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-  sendNotif('ETH Cone v5.2 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));}
+  addLog(`🔄 v5.4 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+  sendNotif('ETH Cone v5.4 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));}
 
 // Multi-TF
 async function fetchAllTF(){
@@ -1539,6 +1632,59 @@ function calcFundAdjLive(dir){
   if(Math.abs(fundingRate)<0.005)return 0;
   if(dir==='long')return fundingRate<-0.01?2:fundingRate>0.01?-2:0;
   return fundingRate>0.01?2:fundingRate<-0.01?-2:0;
+}
+
+// ═══════════════════════════════════════
+// TRIGGER REALTIME UPDATE — ทุก 5s
+// อัปเดตเฉพาะตัวที่เปลี่ยนได้จาก priceHist (ไม่ re-run engine)
+// ═══════════════════════════════════════
+function updateTriggerRealtime(price){
+  if(!C.muEntry)return; // engine ยังไม่รัน
+  const ph=priceHist;
+  if(ph.length<10)return;
+
+  // 1. OBV realtime จาก priceHist
+  let obv=0,prevP=ph[0];
+  for(let i=1;i<ph.length;i++){
+    const p=ph[i];
+    obv+=(p>prevP?1:p<prevP?-1:0);
+    prevP=p;
+  }
+  const obvSlope=ph.length>=20?(obv-(()=>{let o=0,pp=ph[0];for(let i=1;i<Math.floor(ph.length/2);i++){const p=ph[i];o+=(p>pp?1:p<pp?-1:0);pp=p;}return o;})())/ph.length*10:0;
+  const obvPass=obv>0&&obvSlope>0;
+
+  // 2. MACD realtime — EMA12/26 จาก priceHist
+  let macdPass=false;
+  if(ph.length>=26){
+    const ema=n=>{let e=ph[0],k=2/(n+1);for(let i=1;i<ph.length;i++)e=ph[i]*k+e*(1-k);return e;};
+    const hist=ema(12)-ema(26);
+    macdPass=hist>0;
+    const macdRow=el('tr-macd'),macdIcon=el('tri-macd'),macdVal=el('tMacd');
+    if(macdRow)macdRow.className='trig-row '+(macdPass?'pass':'fail');
+    if(macdIcon)macdIcon.textContent=macdPass?'✅':'❌';
+    if(macdVal){macdVal.textContent=macdPass?'BULL ▲ (live)':'BEAR ▼ (live)';macdVal.style.color=macdPass?'var(--green)':'var(--red)';}
+  }
+
+  // 3. OBV row
+  const obvRow=el('tr-obv'),obvIcon=el('tri-obv'),obvVal=el('tObv');
+  if(obvRow)obvRow.className='trig-row '+(obvPass?'pass':'fail');
+  if(obvIcon)obvIcon.textContent=obvPass?'✅':'❌';
+  if(obvVal){obvVal.textContent='Slope:'+(obvSlope>0?'+':'')+obvSlope.toFixed(1)+' OBV:'+(obv>0?'+':'')+obv;obvVal.style.color=obvPass?'var(--green)':'var(--red)';}
+
+  // 4. นับ score ใหม่จาก DOM state ปัจจุบัน
+  const rows=['tr-macd','tr-obv','tr-btc','tr-trap','tr-fg'];
+  const passed=rows.filter(id=>{const r=el(id);return r&&r.classList.contains('pass');}).length;
+  const pct=Math.round(passed/5*100);
+  const sc=el('trigScore'),bar=el('trigBar'),pp=el('trigPct'),go=el('trigGO'),tv=el('trigVerdict');
+  if(sc){sc.textContent=passed+'/5';sc.style.color=passed>=4?'var(--green)':passed>=3?'var(--yellow)':'var(--red)';}
+  if(bar){bar.style.width=pct+'%';bar.style.background=passed>=4?'var(--green)':passed>=3?'var(--yellow)':'var(--red)';}
+  if(pp)pp.textContent=pct+'%';
+  if(go){
+    if(passed>=4){go.textContent='✅ GO — '+passed+'/5 TRIGGERS PASS';go.style.borderColor='var(--green)';go.style.color='var(--green)';go.style.background='rgba(0,255,157,.1)';}
+    else if(passed===3){go.textContent='⚠️ CONDITIONAL — '+passed+'/5 รอ Confirm';go.style.borderColor='var(--yellow)';go.style.color='var(--yellow)';go.style.background='rgba(255,214,0,.06)';}
+    else{go.textContent='❌ NOGO — '+passed+'/5 ยังไม่พร้อม';go.style.borderColor='var(--red)';go.style.color='var(--red)';go.style.background='rgba(255,59,59,.06)';}
+  }
+  if(tv){tv.textContent=passed>=4?'GO':passed>=3?'CONDITIONAL':'NOGO';tv.style.color=passed>=4?'var(--green)':passed>=3?'var(--yellow)':'var(--red)';}
 }
 
 // Alert cards
@@ -1825,7 +1971,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.3 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.3',curPrice||2311,'Baseline v5.3 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.4 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.4',curPrice||2311,'Baseline v5.4 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export

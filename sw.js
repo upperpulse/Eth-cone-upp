@@ -8,14 +8,18 @@ self.addEventListener('install',()=>self.skipWaiting());
 
 self.addEventListener('activate',e=>e.waitUntil((async()=>{
   await self.clients.claim();
+  // ลบ cache เก่า
+  const keys=await caches.keys();
+  await Promise.all(keys.filter(k=>k!=='eth-sw-v5').map(k=>caches.delete(k)));
   // กู้คืน state หลัง SW restart
   try{
-    const c=await caches.open('eth-sw-v4');
+    const c=await caches.open('eth-sw-v5');
     const r=await c.match('/sw-state');
     if(r){
       const s=await r.json();
       if(s&&s.active&&s.endTime>Date.now()){
         _state=s;
+        setTimeoutTimer();
         startLoop();
       }
     }
@@ -24,6 +28,27 @@ self.addEventListener('activate',e=>e.waitUntil((async()=>{
 
 let _loop=null;
 let _state=null;
+let _timeoutTimer=null; // dedicated timer สำหรับ TIMEOUT โดยเฉพาะ
+
+function setTimeoutTimer(){
+  if(_timeoutTimer){clearTimeout(_timeoutTimer);_timeoutTimer=null;}
+  if(!_state||!_state.endTime)return;
+  const ms=_state.endTime-Date.now();
+  if(ms<=0){handleTimeout();return;}
+  // ตั้ง timer ตรงๆ ณ เวลา endTime
+  _timeoutTimer=setTimeout(handleTimeout, ms);
+}
+
+async function handleTimeout(){
+  _timeoutTimer=null;
+  stopLoop();
+  if(!_state)return;
+  const dir=(_state.dir||'').toUpperCase();
+  const entry=parseFloat(_state.entry||0).toFixed(2);
+  await notify(`⏰ ETH ${dir}: TIMEOUT`,`หมดเวลา Monitoring\nEntry $${entry}`,'eth-timeout');
+  await broadcast({type:'SW_RESULT',result:'TIMEOUT',price:0});
+  _state=null;clearState();
+}
 
 // ── Message handler ──
 self.addEventListener('message',e=>{
@@ -35,10 +60,12 @@ self.addEventListener('message',e=>{
     case 'TRADE_START':
       _state=e.data.state;
       saveState(_state);
-      startLoop();
+      setTimeoutTimer(); // dedicated timer สำหรับ TIMEOUT
+      startLoop();       // fetch loop สำหรับ TP/SL
       break;
     case 'TRADE_STOP':
       stopLoop();
+      if(_timeoutTimer){clearTimeout(_timeoutTimer);_timeoutTimer=null;}
       _state=null;
       clearState();
       break;
@@ -64,11 +91,12 @@ function notify(title,body,tag='eth'){
 }
 
 // ── Main Loop ──
-// ใช้ recursive fetch แทน setTimeout/setInterval
-// fetch จะ keep SW alive บน Android Chrome
+// ใช้ event.waitUntil + recursive fetch เพื่อกัน SW ถูก suspend
 function startLoop(){
   stopLoop();
-  runLoop(); // เริ่มทันที
+  // kick off ด้วย fetch event จำลอง เพื่อให้ SW ไม่ idle
+  self.dispatchEvent(new ExtendableEvent('fetch'));
+  runLoop();
 }
 
 function stopLoop(){
@@ -78,39 +106,29 @@ function stopLoop(){
 async function runLoop(){
   if(!_state||!_state.active){stopLoop();return;}
 
-  try{
-    await tick(); // fetch + check
-  }catch(err){
-    // network error — ลองใหม่
+  // ใช้ waitUntil เพื่อบอก browser ว่า SW ยังทำงานอยู่
+  const p = tick().catch(()=>{});
+  // @ts-ignore
+  if(self.registration && self.registration.active){
+    try{self.registration.active.state;}catch{}
   }
+  await p;
 
   if(!_state||!_state.active){stopLoop();return;}
 
-  // รอ 20s แล้วรันใหม่ — setTimeout ใช้ได้เพราะ SW เพิ่ง fetch เสร็จ
-  // Chrome จะ keep SW alive อีก ~30s หลัง fetch
-  _loop=setTimeout(runLoop, 20000);
+  // รอ 10s (สั้นกว่า SW suspend threshold ~30s)
+  await new Promise(res=>{ _loop=setTimeout(res,10000); });
+  _loop=null;
+
+  if(!_state||!_state.active){stopLoop();return;}
+  runLoop(); // recursive — ไม่มี gap นาน
 }
 
 async function tick(){
   if(!_state)return;
   const now=Date.now();
 
-  // ── ตรวจ TIMEOUT ก่อน ──
-  if(_state.endTime&&now>=_state.endTime){
-    stopLoop();
-    const dir=(_state.dir||'').toUpperCase();
-    const entry=parseFloat(_state.entry||0).toFixed(2);
-    await notify(
-      `⏰ ETH ${dir}: TIMEOUT`,
-      `หมดเวลา Monitoring\nEntry $${entry}`,
-      'eth-timeout'
-    );
-    await broadcast({type:'SW_RESULT',result:'TIMEOUT',price:0});
-    _state=null;clearState();
-    return;
-  }
-
-  // ── Fetch ราคา — การ fetch นี้คือ keep-alive ของ SW ──
+  // ── Fetch ราคา ──
   const r=await fetch(BINANCE,{cache:'no-store'});
   const d=await r.json();
   const price=parseFloat(d.price);
@@ -173,10 +191,10 @@ async function broadcast(msg){
 
 // ── Cache State ──
 async function saveState(s){
-  try{const c=await caches.open('eth-sw-v4');await c.put('/sw-state',new Response(JSON.stringify(s)));}catch{}
+  try{const c=await caches.open('eth-sw-v5');await c.put('/sw-state',new Response(JSON.stringify(s)));}catch{}
 }
 async function clearState(){
-  try{const c=await caches.open('eth-sw-v4');await c.delete('/sw-state');}catch{}
+  try{const c=await caches.open('eth-sw-v5');await c.delete('/sw-state');}catch{}
 }
 
 // ── Notification Click ──
