@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.8 — nattajoe</title>
+<title>ETH Cone v5.9 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -221,7 +221,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.8</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.9</span></div>
     <div class="brand-sub">OBV15 · RSI30 · NORM.CONF · BTC · F&G·6H · BACKTEST L+S · CSV · nattajoe</div>
   </div>
   <div class="hdr-right">
@@ -701,7 +701,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.8 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.9 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -730,7 +730,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.8 — nattajoe
+// ETH CONE ULTIMATE v5.9 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
@@ -993,7 +993,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.8 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.9 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1171,7 +1171,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.8
+// BASELINE ENGINE v5.9
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1293,7 +1293,7 @@ async function runEngine(kd){
   // เก็บ entrySig ล่าสุดสำหรับ checkGoSignal
   lastEntrySig=entrySig;
 
-  // Smart Entry Delay — v5.8 improved
+  // Smart Entry Delay — v5.9 improved
   const macdReady=macd1h.cross||macd1h.positive; // Cross = stronger signal
   const macdCross=macd1h.cross;
   const obvReady=obvPos&&realOBV.slope>0;
@@ -1494,6 +1494,8 @@ async function reanalyze(){
     return;
   }
   const ov=el('anOv');ov.classList.add('show');
+  // Safety: บังคับซ่อน overlay หลัง 25s ไม่ว่าจะเกิดอะไร
+  const ovSafe=setTimeout(()=>{ov.classList.remove('show');addLog('⚠️ Overlay timeout — force hidden','var(--yellow)');},25000);
   alTrig={short:false,long:false,whale:false,sl:false};priceHist=[];
   el('btnGo').style.display='none';el('btnNoGo').style.display='none';
   const steps=[
@@ -1509,7 +1511,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.8 Ready',p:100}];
+    {t:'✅ Baseline v5.9 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   // ตรวจว่าเปิดจาก local file
   const isLocal=location.protocol==='file:'||location.protocol==='content:';
@@ -1544,10 +1546,18 @@ async function reanalyze(){
   // FIX 2: แสดง Both-side Backtest
   const btEl=el('btScoreEl');
   if(btEl)btEl.textContent=`1H Long:${(bt.ratioL*100).toFixed(0)}% Short:${(bt.ratioS*100).toFixed(0)}% Score:${bt.score}/100`;
-  await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
-  await update();ov.classList.remove('show');
-  addLog(`🔄 v5.8 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-  sendNotif('ETH Cone v5.8 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));}
+  try{
+    await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
+    await update();
+    addLog(`🔄 v5.9 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+    sendNotif('ETH Cone v5.9 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
+  }catch(e){
+    addLog('❌ Engine error: '+e.message,'var(--red)');
+  }finally{
+    clearTimeout(ovSafe);
+    ov.classList.remove('show'); // ซ่อน overlay เสมอ ไม่ว่าจะ success หรือ error
+  }
+}
 
 // Multi-TF
 async function fetchAllTF(){
@@ -2059,7 +2069,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.8 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.8',curPrice||2311,'Baseline v5.8 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.9 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.9',curPrice||2311,'Baseline v5.9 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export
