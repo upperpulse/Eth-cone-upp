@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.10 — nattajoe</title>
+<title>ETH Cone v5.12 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -221,7 +221,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.10</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.12</span></div>
     <div class="brand-sub">OBV15 · RSI30 · NORM.CONF · BTC · F&G·6H · BACKTEST L+S · CSV · nattajoe</div>
   </div>
   <div class="hdr-right">
@@ -701,7 +701,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.10 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.12 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -730,7 +730,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.10 — nattajoe
+// ETH CONE ULTIMATE v5.12 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
@@ -993,7 +993,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.10 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.12 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1171,7 +1171,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.10
+// BASELINE ENGINE v5.12
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1291,33 +1291,42 @@ async function runEngine(kd){
   // เก็บ base values สำหรับ Live Adjustment
   liveBaseLC=lConf;liveBaseSC=sConf;liveRSI=rsi;
 
-  // Smart Entry Delay — v5.10 improved
-  const macdReady=macd1h.cross||macd1h.positive; // Cross = stronger signal
+  // Smart Entry Delay — v5.12
+  // ลำดับ: Conf ≥ 75% ก่อน → แล้วค่อยตรวจ Trigger
+  const macdReady=macd1h.cross||macd1h.positive;
   const macdCross=macd1h.cross;
   const obvReady=obvPos&&realOBV.slope>0;
-  const btcAligned=btcBullish; // BTC ต้อง align ด้วย
+  const btcAligned=btcBullish;
   const rsiOK=!rsiOverbought&&!rsiOversold||(rsiOversold&&lConf>sConf)||(rsiOverbought&&sConf>lConf);
-  const confOK=Math.max(lConf,sConf)>=75; // ต้องมี Conf ≥ 75% ก่อน GO
+  const topConfNow=Math.max(lConf,sConf);
+  const confOK=topConfNow>=75; // Gate 1: ต้องผ่านก่อนเสมอ
+
+  // นับ trigger score (ใช้แสดงผล)
+  const fgVal=parseInt(C._fgVal||50);
+  const fgOK=fgVal>20&&fgVal<80;
+  const trigCount=[macdCross||macd1h.positive,obvReady,btcAligned,!trapAlert,fgOK].filter(Boolean).length;
+  const confMin=75; // fixed
 
   let entrySig='HOLD';
-  if(trapAlert){
+  if(!confOK){
+    // Conf ต่ำ → ไม่ตรวจ Trigger เลย
+    entrySig='HOLD — Conf ต่ำ ('+topConfNow+'% / ต้อง 75%)';
+  } else if(trapAlert){
     entrySig='NO GO — TRAP DETECTED';
-  } else if(macdCross&&obvReady&&btcAligned&&rsiOK&&confOK){
-    entrySig='GO'; // แม่นสุด: Cross + OBV + BTC + RSI + Conf
-  } else if(macd1h.positive&&obvReady&&btcAligned&&confOK){
-    entrySig='SOFT GO — รอ MACD Cross'; // ดีแต่ยังไม่ perfect
+  } else if(macdCross&&obvReady&&btcAligned&&rsiOK){
+    entrySig='GO';
+  } else if(macd1h.positive&&obvReady&&btcAligned){
+    entrySig='SOFT GO — รอ MACD Cross';
   } else if(macd1h.positive&&obvReady&&!btcAligned){
     entrySig='HOLD — BTC ไม่ Align';
   } else if(macd1h.positive&&!obvReady){
     entrySig='HOLD — รอ OBV Slope+';
   } else if(!macd1h.positive&&macdCross){
     entrySig='WATCH — MACD Cross เพิ่งเกิด';
-  } else if(!confOK){
-    entrySig='HOLD — Conf ต่ำ ('+Math.max(lConf,sConf)+'%)';
   } else {
     entrySig='HOLD — MACD ยังไม่ Cross';
   }
-  lastEntrySig=entrySig; // บันทึกหลัง declare แล้ว
+  lastEntrySig=entrySig;
 
   // Go/NoGo verdict
   let topConf=Math.max(lConf,sConf),topDir=lConf>=sConf?'LONG':'SHORT';
@@ -1337,7 +1346,8 @@ async function runEngine(kd){
     lConf,sConf,lRaw,sRaw,topConf,topDir,
     verdict,vClass,entrySig,
     macdReady:macd1h.positive,macdCross,obvReady,
-    btcBullish,btcMacdPos,fundAdj,fundingRate};
+    btcBullish,btcMacdPos,fundAdj,fundingRate,
+    trigCount,confMin};
   updateMainUI(ad);updateTriggerUI(ad);
 }
 
@@ -1453,7 +1463,7 @@ function updateTriggerUI(d){
   setTV('sedMom',d.maStack?'✅ Active':'⏳ Weak',d.maStack?'var(--green)':'var(--yellow)');
   const se=el('sedSig');if(se){se.textContent=d.entrySig;se.style.color=d.entrySig==='GO'?'var(--green)':d.entrySig.includes('HOLD')||d.entrySig.includes('SOFT')?'var(--yellow)':'var(--red)';}
   const sv=el('sedVerdict');if(sv){sv.textContent=d.entrySig==='GO'?'✅ MOMENTUM CONFIRMED':'⏳ '+d.entrySig;sv.style.borderColor=d.entrySig==='GO'?'var(--green)':'var(--muted)';sv.style.color=d.entrySig==='GO'?'var(--green)':'var(--muted)';}
-  const confDebug=el('confDebug');if(confDebug)confDebug.textContent=`L:${d.lConf}% S:${d.sConf}% | Trig:${passed}/5`;
+  const confDebug=el('confDebug');if(confDebug)confDebug.textContent=`L:${d.lConf}% S:${d.sConf}% | Trig:${d.trigCount}/5 | MinConf:${d.confMin}%`;
 }
 
 // Go/NoGo
@@ -1510,7 +1520,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.10 Ready',p:100}];
+    {t:'✅ Baseline v5.12 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   // ตรวจว่าเปิดจาก local file
   const isLocal=location.protocol==='file:'||location.protocol==='content:';
@@ -1542,14 +1552,15 @@ async function reanalyze(){
   const fgColor=fg<=25?'var(--red)':fg<=45?'var(--orange)':fg<=55?'var(--yellow)':'var(--green)';
   const fgLabel=fg<=25?'😱 Extreme Fear':fg<=45?'😨 Fear':fg<=55?'😐 Neutral':fg<=75?'😊 Greed':'🤑 Extreme Greed';
   setTV('tFG',fg+' — '+fgLabel+(fgCache.ts>0?' (cache)':''),fgColor);
+  C._fgVal=fg; // เก็บไว้ให้ entrySig ใช้
   // FIX 2: แสดง Both-side Backtest
   const btEl=el('btScoreEl');
   if(btEl)btEl.textContent=`1H Long:${(bt.ratioL*100).toFixed(0)}% Short:${(bt.ratioS*100).toFixed(0)}% Score:${bt.score}/100`;
   try{
     await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
     await update();
-    addLog(`🔄 v5.10 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-    sendNotif('ETH Cone v5.10 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
+    addLog(`🔄 v5.12 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+    sendNotif('ETH Cone v5.12 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
   }catch(e){
     addLog('❌ Engine error: '+e.message,'var(--red)');
   }finally{
@@ -2068,7 +2079,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.10 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.10',curPrice||2311,'Baseline v5.10 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.12 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.12',curPrice||2311,'Baseline v5.12 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export
