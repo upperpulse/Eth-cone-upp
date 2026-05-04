@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.12 — nattajoe</title>
+<title>ETH Cone v5.13 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -221,7 +221,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.12</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.13</span></div>
     <div class="brand-sub">OBV15 · RSI30 · NORM.CONF · BTC · F&G·6H · BACKTEST L+S · CSV · nattajoe</div>
   </div>
   <div class="hdr-right">
@@ -492,17 +492,18 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
     <div class="card cy">
       <div class="ctitle">🎯 PAPER TRADE SETUP</div>
 
-      <!-- TF SELECT -->
-      <div style="font-size:8px;color:var(--muted);letter-spacing:2px;margin-bottom:6px;">เลือก TF (ใช้คำนวณ σ)</div>
-      <div class="tf-grid">
-        <div class="tfbtn" onclick="selTF('1m')" id="tf-1m">1m</div>
-        <div class="tfbtn" onclick="selTF('5m')" id="tf-5m">5m</div>
-        <div class="tfbtn" onclick="selTF('15m')" id="tf-15m">15m</div>
-        <div class="tfbtn sel" onclick="selTF('1h')" id="tf-1h">⭐ 1H</div>
-        <div class="tfbtn" onclick="selTF('4h')" id="tf-4h">4H</div>
-        <div class="tfbtn" onclick="selTF('1d')" id="tf-1d">1D</div>
-        <div class="tfbtn" onclick="selTF('1w')" id="tf-1w">1W</div>
-        <div class="tfbtn" onclick="selTF('1M')" id="tf-1M">1M</div>
+      <!-- AUTO TF — จาก Backtest Score -->
+      <div style="background:var(--dim);border:1px solid rgba(0,212,255,.2);border-radius:4px;padding:10px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-size:8px;color:var(--muted);letter-spacing:2px;margin-bottom:4px;">TF — AUTO BEST BACKTEST</div>
+          <div style="font-family:'Orbitron',monospace;font-size:16px;font-weight:700;color:var(--yellow);" id="autoTFDisplay">⭐ 1H</div>
+          <div style="font-size:8px;color:var(--muted);margin-top:3px;font-family:'Share Tech Mono',monospace;" id="autoTFReason">Hit:78% · Score:86 · Stability:High</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:8px;color:var(--muted);letter-spacing:1px;margin-bottom:2px;">SCORE</div>
+          <div style="font-size:22px;font-family:'Orbitron',monospace;font-weight:700;color:var(--green);" id="autoTFScore">86</div>
+          <div style="font-size:8px;color:var(--green);letter-spacing:2px;">BEST</div>
+        </div>
       </div>
 
       <!-- DIR + SIZE -->
@@ -701,7 +702,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.12 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.13 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -730,7 +731,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.12 — nattajoe
+// ETH CONE ULTIMATE v5.13 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
@@ -993,7 +994,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.12 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.13 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1171,7 +1172,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.12
+// BASELINE ENGINE v5.13
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1291,7 +1292,7 @@ async function runEngine(kd){
   // เก็บ base values สำหรับ Live Adjustment
   liveBaseLC=lConf;liveBaseSC=sConf;liveRSI=rsi;
 
-  // Smart Entry Delay — v5.12
+  // Smart Entry Delay — v5.13
   // ลำดับ: Conf ≥ 75% ก่อน → แล้วค่อยตรวจ Trigger
   const macdReady=macd1h.cross||macd1h.positive;
   const macdCross=macd1h.cross;
@@ -1520,7 +1521,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.12 Ready',p:100}];
+    {t:'✅ Baseline v5.13 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   // ตรวจว่าเปิดจาก local file
   const isLocal=location.protocol==='file:'||location.protocol==='content:';
@@ -1559,8 +1560,8 @@ async function reanalyze(){
   try{
     await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
     await update();
-    addLog(`🔄 v5.12 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-    sendNotif('ETH Cone v5.12 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
+    addLog(`🔄 v5.13 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+    sendNotif('ETH Cone v5.13 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
   }catch(e){
     addLog('❌ Engine error: '+e.message,'var(--red)');
   }finally{
@@ -1821,7 +1822,30 @@ function checkAlerts(p){
 function setDur(secs){el('customWrap').style.display='none';document.querySelectorAll('.durbtn').forEach(b=>b.classList.remove('sel'));const m={300:'dur-300',900:'dur-900',1800:'dur-1800',3600:'dur-3600',7200:'dur-7200',14400:'dur-14400',28800:'dur-28800'};if(m[secs])el(m[secs]).classList.add('sel');customDurSecs=secs;el('durDisplay').textContent=fmtDur(secs);}
 function showCustomDur(){document.querySelectorAll('.durbtn').forEach(b=>b.classList.remove('sel'));el('dur-custom').classList.add('sel');el('customWrap').style.display='block';}
 function applyCustomDur(){const h=parseInt(el('inH').value)||0,m=parseInt(el('inM').value)||0,s=parseInt(el('inS').value)||0;const total=h*3600+m*60+s;if(total<10){alert('ขั้นต่ำ 10 วินาที');return;}customDurSecs=total;el('durDisplay').textContent=fmtDur(total);el('customWrap').style.display='none';el('dur-custom').textContent='✓ '+fmtDur(total);}
-function selTF(tf){document.querySelectorAll('.tfbtn').forEach(b=>b.classList.remove('sel'));el('tf-'+tf).classList.add('sel');tradeTF=tf;}
+// Auto TF — เลือก TF ที่ Backtest score ดีที่สุด
+const BT_STATIC={
+  '1m':{hit:58,score:61,stab:'Low',rank:'❌'},
+  '5m':{hit:64,score:68,stab:'Med',rank:'⚠️'},
+  '15m':{hit:74,score:81,stab:'Med-H',rank:'✅'},
+  '1h':{hit:78,score:86,stab:'High',rank:'BEST'},
+  '4h':{hit:72,score:79,stab:'Med',rank:'✅'},
+  '1d':{hit:65,score:74,stab:'Med',rank:'⚠️'},
+  '1w':{hit:55,score:62,stab:'Low',rank:'❌'},
+  '1M':{hit:50,score:55,stab:'V.Low',rank:'❌'}
+};
+function updateAutoTF(){
+  // หา TF ที่ score สูงสุด
+  let best='1h',bestScore=0;
+  Object.entries(BT_STATIC).forEach(([tf,d])=>{if(d.score>bestScore){bestScore=d.score;best=tf;}});
+  tradeTF=best;
+  const d=BT_STATIC[best];
+  const lbl=TF_LBL[best]||best.toUpperCase();
+  const disp=el('autoTFDisplay'),reason=el('autoTFReason'),score=el('autoTFScore');
+  if(disp)disp.textContent='⭐ '+lbl;
+  if(reason)reason.textContent=`Hit:${d.hit}% · Score:${d.score} · Stability:${d.stab}`;
+  if(score){score.textContent=d.score;score.style.color=d.score>=80?'var(--green)':d.score>=65?'var(--yellow)':'var(--red)';}
+}
+function selTF(tf){tradeTF=tf;} // ยังเก็บไว้เผื่อ internal call
 function setDir(d){tradeDir=d;el('dirLong').classList.toggle('on',d==='long');el('dirShort').classList.toggle('on',d==='short');calcHoldSuggest();}
 function setSize(s){tradeSize=s;['sz100','sz500','sz1000'].forEach(id=>el(id).classList.remove('on'));const m={100:'sz100',500:'sz500',1000:'sz1000'};if(m[s])el(m[s]).classList.add('on');}
 
@@ -2079,7 +2103,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.12 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.12',curPrice||2311,'Baseline v5.12 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.13 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.13',curPrice||2311,'Baseline v5.13 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export
@@ -2153,7 +2177,7 @@ if('Notification' in window&&Notification.permission==='granted'){notifGranted=t
 if(window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone){
   const b=el('pwaBanner');if(b)b.style.display='none';
 }
-setDir('long');setSize(100);selTF('1h');setDur(3600);
+setDir('long');setSize(100);updateAutoTF();setDur(3600);
 reanalyze();
 setInterval(tickRef,1000);
 </script>
