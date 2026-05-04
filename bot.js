@@ -321,16 +321,150 @@ Price: $${p}
   }
 }
 
+// ── Trade Monitor — รับข้อมูลจาก Dashboard ──
+const http = require('http');
+let tradeState = null;
+let tradeInterval = null;
+
+function startTradeMonitor(state) {
+  stopTradeMonitor();
+  tradeState = state;
+  console.log('📊 Trade Monitor started:', JSON.stringify(state));
+  tg(`📊 <b>Trade Monitor เริ่มแล้ว!</b>
+
+🎯 Direction: ${state.dir.toUpperCase()}
+💰 Entry: $${parseFloat(state.entry).toFixed(2)}
+🎯 TP1: $${parseFloat(state.tp1).toFixed(2)}
+🏆 TP2: $${parseFloat(state.tp2).toFixed(2)}
+🛑 SL: $${parseFloat(state.sl).toFixed(2)}
+⏱ Duration: ${state.dur}
+
+Bot จะแจ้งเมื่อ TP/SL/Timeout`, true);
+
+  tradeInterval = setInterval(async () => {
+    if (!tradeState) { stopTradeMonitor(); return; }
+    const now = Date.now();
+
+    // Timeout check
+    if (tradeState.endTime && now >= tradeState.endTime) {
+      stopTradeMonitor();
+      const price = await fetchPrice().catch(() => tradeState.entry);
+      const pnl = tradeState.dir === 'long'
+        ? (price - tradeState.entry) * tradeState.qty
+        : (tradeState.entry - price) * tradeState.qty;
+      await tg(`⏰ <b>Trade TIMEOUT</b>
+
+🎯 ${tradeState.dir.toUpperCase()} | Entry: $${parseFloat(tradeState.entry).toFixed(2)}
+💰 Exit Price: $${parseFloat(price).toFixed(2)}
+📊 PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`, true);
+      tradeState = null;
+      return;
+    }
+
+    // Fetch price และตรวจ TP/SL
+    let price;
+    try { price = await fetchPrice(); } catch { return; }
+    const p = parseFloat(price);
+    const entry = parseFloat(tradeState.entry);
+    const tp1 = parseFloat(tradeState.tp1);
+    const tp2 = parseFloat(tradeState.tp2);
+    const sl = parseFloat(tradeState.sl);
+    const qty = parseFloat(tradeState.qty || 0.04);
+    const fmt = v => v.toFixed(2);
+
+    if (tradeState.dir === 'long') {
+      if (!tradeState.tp1Hit && p >= tp1) {
+        tradeState.tp1Hit = true;
+        const rem = tradeState.endTime ? Math.round((tradeState.endTime - now) / 60000) : '?';
+        await tg(`🎯 <b>LONG TP1 HIT!</b>\n\n$${fmt(p)} ≥ TP1 $${fmt(tp1)}\nเหลือ ${rem} นาที`, true);
+      }
+      if (p >= tp2) {
+        stopTradeMonitor();
+        await tg(`🏆 <b>LONG TP2 WIN!</b>\n\n$${fmt(p)} | Entry $${fmt(entry)}\n+$${fmt((p - entry) * qty)}`, true);
+        tradeState = null;
+      } else if (p <= sl) {
+        stopTradeMonitor();
+        await tg(`🛑 <b>LONG SL HIT</b>\n\n$${fmt(p)} | Entry $${fmt(entry)}\n-$${fmt((entry - p) * qty)}`, true);
+        tradeState = null;
+      }
+    } else {
+      if (!tradeState.tp1Hit && p <= tp1) {
+        tradeState.tp1Hit = true;
+        const rem = tradeState.endTime ? Math.round((tradeState.endTime - now) / 60000) : '?';
+        await tg(`🎯 <b>SHORT TP1 HIT!</b>\n\n$${fmt(p)} ≤ TP1 $${fmt(tp1)}\nเหลือ ${rem} นาที`, true);
+      }
+      if (p <= tp2) {
+        stopTradeMonitor();
+        await tg(`🏆 <b>SHORT TP2 WIN!</b>\n\n$${fmt(p)} | Entry $${fmt(entry)}\n+$${fmt((entry - p) * qty)}`, true);
+        tradeState = null;
+      } else if (p >= sl) {
+        stopTradeMonitor();
+        await tg(`🛑 <b>SHORT SL HIT</b>\n\n$${fmt(p)} | Entry $${fmt(entry)}\n-$${fmt((p - entry) * qty)}`, true);
+        tradeState = null;
+      }
+    }
+  }, 10000);
+}
+
+function stopTradeMonitor() {
+  if (tradeInterval) { clearInterval(tradeInterval); tradeInterval = null; }
+}
+
+// ── HTTP Server — รับ POST จาก Dashboard ──
+const server = http.createServer((req, res) => {
+  // CORS headers — ให้ Dashboard เรียกได้
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+  if (req.method === 'POST' && req.url === '/trade') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const state = JSON.parse(body);
+        if (state.action === 'start') {
+          startTradeMonitor(state);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, msg: 'Trade monitor started' }));
+        } else if (state.action === 'stop') {
+          stopTradeMonitor();
+          tradeState = null;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, msg: 'Trade monitor stopped' }));
+        } else {
+          res.writeHead(400); res.end('Unknown action');
+        }
+      } catch (e) {
+        res.writeHead(400); res.end('Invalid JSON');
+      }
+    });
+  } else if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, trade: !!tradeState, sig: lastSig }));
+  } else {
+    res.writeHead(404); res.end('Not found');
+  }
+});
+
+server.listen(3000, () => {
+  console.log('🌐 HTTP Server listening on port 3000');
+});
+
 // ── Start ───────────────────────────────
-console.log('🚀 ETH Cone Bot v2.0 Started — Logic = Dashboard v5.13');
+console.log('🚀 ETH Cone Bot v3.0 Started — Trade Monitor + Signal Alert');
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
-tg(`🚀 <b>ETH Cone Bot v2.0 เริ่มทำงาน!</b>
+tg(`🚀 <b>ETH Cone Bot v3.0 เริ่มทำงาน!</b>
 
 🧠 Logic = Dashboard v5.13
 📡 Monitor ทุก 10s | Oracle Cloud 🇸🇬
+🌐 Trade Monitor: รับ TP/SL จาก Dashboard
 ⚡ Gate: Conf ≥75% → Trigger 5 ตัว → GO
 
-แจ้งเตือน: GO / SOFT GO / TRAP / Conf Alert`);
+แจ้งเตือน: GO / SOFT GO / TRAP / TP1 / TP2 / SL / TIMEOUT`);
 
 analyze();
 setInterval(analyze, 10000);
+
