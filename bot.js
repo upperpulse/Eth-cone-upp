@@ -348,6 +348,10 @@ let tradeInterval = null;
 function startTradeMonitor(state) {
   stopTradeMonitor();
   tradeState = state;
+  // block signal notification หลัง trade start 2 นาที
+  goCooldown = Date.now() + 120000;
+  softGoCooldown = Date.now() + 120000;
+  lastConfAlert = true; // ไม่แจ้ง conf ซ้ำ
   console.log('📊 Trade Monitor started:', JSON.stringify(state));
   tg(`📊 <b>Trade Monitor เริ่มแล้ว!</b>
 
