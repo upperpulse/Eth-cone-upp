@@ -306,13 +306,19 @@ async function analyze() {
     }
 
     // Conf ≥ 75% alert ครั้งแรก
-    if (confOK && !lastConfAlert) {
+    if(confOK && !lastConfAlert) {
       lastConfAlert = true;
+      const topDir = conf === Math.max(conf, conf) ?
+        (macd1h.positive ? '🟢 LONG' : '🔴 SHORT') : '—';
       await tg(
 `📊 <b>Confidence ≥ 75%!</b>
 
-Conf: ${conf}% | Trigger: ${trigs.score}/5
-Price: $${p}
+🎯 Direction: <b>${macd1h.positive ? '🟢 LONG' : '🔴 SHORT'}</b>
+📊 Conf: ${conf}% | Trigger: ${trigs.score}/5
+💰 Price: $${p}
+📉 RSI: ${rsi.toFixed(1)}
+😨 F&G: ${fg} ${fgLabel}
+
 ระบบเริ่มตรวจ Trigger แล้ว`, true);
     } else if (!confOK) {
       lastConfAlert = false;
