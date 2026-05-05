@@ -437,8 +437,9 @@ function stopTradeMonitor() {
 const server = http.createServer((req, res) => {
   // CORS headers — ให้ Dashboard เรียกได้
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, ngrok-skip-browser-warning');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, ngrok-skip-browser-warning, User-Agent');
+  res.setHeader('ngrok-skip-browser-warning', 'true');
 
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
