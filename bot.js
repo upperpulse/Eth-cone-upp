@@ -464,16 +464,12 @@ server.listen(3000, () => {
 });
 
 // ── Start ───────────────────────────────
-console.log('🚀 ETH Cone Bot v3.0 Started — Trade Monitor + Signal Alert');
+console.log('🚀 ETH Cone Bot v3.0 Started');
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
-tg(`🚀 <b>ETH Cone Bot v3.0 เริ่มทำงาน!</b>
 
-🧠 Logic = Dashboard v5.16
-📡 Monitor ทุก 10s | Oracle Cloud 🇸🇬
-🌐 Trade Monitor: รับ TP/SL จาก Dashboard
-⚡ Gate: Conf ≥75% → Trigger 5 ตัว → GO
-
-แจ้งเตือน: GO / SOFT GO / TRAP / TP1 / TP2 / SL / TIMEOUT`);
+// แสดง startup message เฉพาะครั้งแรก ไม่แสดงตอน PM2 restart
+const isFirstRun = !process.env.PM2_RESTART_DELAY;
+if(isFirstRun) tg('🚀 <b>ETH Cone Bot v3.0 Online</b> | Oracle 🇸🇬');
 
 analyze();
 setInterval(analyze, 10000);
