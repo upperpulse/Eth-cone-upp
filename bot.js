@@ -1,15 +1,9 @@
 // ETH Cone Bot v3.0 — Oracle VM
-// Token อยู่ใน Environment Variables — ไม่เก็บใน code
 
-const BOT_TOKEN = process.env.TG_TOKEN || '';
-const CHAT_ID   = process.env.TG_CHAT  || '';
+const BOT_TOKEN = process.env.TG_TOKEN || '8397156356:AAHpIeQYWikPCH2wthqYBWMCMp0sXmFLcMM';
+const CHAT_ID   = process.env.TG_CHAT  || '7970078364';
 const BINANCE   = 'https://fapi.binance.com';
 const FG_API    = 'https://api.alternative.me/fng/?limit=1';
-
-if(!BOT_TOKEN||!CHAT_ID){
-  console.error('❌ ต้องตั้ง TG_TOKEN และ TG_CHAT ใน environment');
-  process.exit(1);
-}
 
 // ── State ──────────────────────────────
 let lastSig = '';
@@ -202,9 +196,15 @@ function checkTriggers(macd, obv, btcBull, trap, fg) {
   return { t1, t2, t3, t4, t5, score };
 }
 
-// ── Main Analysis — Logic เหมือน Dashboard v5.13 ──
+// ── ETH Cone Bot v3.0 — Dashboard v5.19 ──
+// ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
+
+// ── Main Analysis ──
 async function analyze() {
   try {
+    // ── ถ้า trade รันอยู่ → ไม่ต้อง analyze signal ────
+    if (tradeState) return;
+
     const [ethK, btcK, price, funding, fg] = await Promise.all([
       fetchKlines('ETHUSDT', '1h', 80),
       fetchKlines('BTCUSDT', '1h', 60),
@@ -263,12 +263,6 @@ async function analyze() {
     console.log(`[${new Date().toLocaleTimeString('th-TH')}] $${p} Conf:${conf}% RSI:${rsi.toFixed(0)} Trig:${trigs.score}/5 | ${sig}`);
 
     // ── Notifications ──────────────────────
-    // ── ไม่แจ้ง Signal ขณะ Trade Monitor รัน ──
-    if(tradeState){
-      lastSig=sig; // update state แต่ไม่แจ้ง
-      return;
-    }
-
     if (sig === 'GO' && sig !== lastSig && now > goCooldown) {
       goCooldown = now + 180000;
       await tg(
@@ -316,8 +310,8 @@ async function analyze() {
 ❌ งดเทรด รอ Signal ใหม่`, true);
     }
 
-    // Conf ≥ 75% alert — ส่งเฉพาะถ้าไม่ได้รวมไปกับ Signal แล้ว
-    if(confOK && !lastConfAlert) {
+    // Conf ≥ 75% alert — ส่งครั้งเดียว จนกว่า trade จะจบ
+    if(confOK && !lastConfAlert && !tradeState) {
       lastConfAlert = true;
       await tg(
 `📊 <b>Confidence ≥ 75%!</b>
@@ -329,15 +323,35 @@ async function analyze() {
 😨 F&G: ${fg} ${fgLabel}
 
 ระบบเริ่มตรวจ Trigger แล้ว`, true);
-    } else if (!confOK) {
-      lastConfAlert = false;
     }
+    // lastConfAlert reset เฉพาะตอน trade จบ — ดู stopTradeMonitor()
 
     lastSig = sig;
 
   } catch (e) {
     console.error('Analyze error:', e.message);
   }
+}
+
+// ── Trade State Persistence ──────────────
+const TRADE_FILE = '/home/ubuntu/eth-bot/.trade_state.json';
+
+function saveTradeFile(state) {
+  try { fs.writeFileSync(TRADE_FILE, JSON.stringify(state)); } catch {}
+}
+function loadTradeFile() {
+  try {
+    if (!fs.existsSync(TRADE_FILE)) return null;
+    const s = JSON.parse(fs.readFileSync(TRADE_FILE, 'utf8'));
+    if (!s || !s.active || Date.now() >= s.endTime) {
+      fs.unlinkSync(TRADE_FILE);
+      return null;
+    }
+    return s;
+  } catch { return null; }
+}
+function clearTradeFile() {
+  try { if (fs.existsSync(TRADE_FILE)) fs.unlinkSync(TRADE_FILE); } catch {}
 }
 
 // ── Trade Monitor — รับข้อมูลจาก Dashboard ──
@@ -348,7 +362,7 @@ let tradeInterval = null;
 function startTradeMonitor(state) {
   stopTradeMonitor();
   tradeState = state;
-  // block signal notification หลัง trade start 2 นาที
+  saveTradeFile({...state, active: true});
   goCooldown = Date.now() + 120000;
   softGoCooldown = Date.now() + 120000;
   lastConfAlert = true; // ไม่แจ้ง conf ซ้ำ
@@ -431,6 +445,8 @@ Bot จะแจ้งเมื่อ TP/SL/Timeout`, true);
 
 function stopTradeMonitor() {
   if (tradeInterval) { clearInterval(tradeInterval); tradeInterval = null; }
+  clearTradeFile();
+  lastConfAlert = false; // reset หลัง trade จบ — พร้อม alert รอบใหม่
 }
 
 // ── HTTP Server — รับ POST จาก Dashboard ──
@@ -480,6 +496,15 @@ server.listen(3000, () => {
 // ── Start ───────────────────────────────
 console.log('🚀 ETH Cone Bot v3.0 Started');
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
+
+// Restore trade state หลัง reboot
+const savedTrade = loadTradeFile();
+if (savedTrade) {
+  tradeState = savedTrade;
+  startTradeMonitor(savedTrade);
+  console.log('♻️ Restored trade state after reboot');
+  tg(`♻️ <b>Restore Trade หลัง Reboot</b>\n\n🎯 ${savedTrade.dir.toUpperCase()} Entry: $${parseFloat(savedTrade.entry).toFixed(2)}\nเหลือ ${Math.max(0,Math.round((savedTrade.endTime-Date.now())/60000))} นาที`, true);
+}
 
 // แสดงครั้งเดียวตอน start — ใช้ flag file
 const fs = require('fs');

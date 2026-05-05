@@ -1,0 +1,6 @@
+แก้ไข ทุกครั้ง ให้ update title ด้วย
+
+── Bot Sync Rule ──
+ทุกครั้งที่แก้ไข index.html และ bump version เช่น v5.19 → v5.20
+ต้อง update บรรทัดแรกของ bot.js ด้วย:
+// ── ETH Cone Bot v3.0 — Dashboard v5.20 ──
