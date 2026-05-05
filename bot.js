@@ -263,6 +263,12 @@ async function analyze() {
     console.log(`[${new Date().toLocaleTimeString('th-TH')}] $${p} Conf:${conf}% RSI:${rsi.toFixed(0)} Trig:${trigs.score}/5 | ${sig}`);
 
     // ── Notifications ──────────────────────
+    // ── ไม่แจ้ง Signal ขณะ Trade Monitor รัน ──
+    if(tradeState){
+      lastSig=sig; // update state แต่ไม่แจ้ง
+      return;
+    }
+
     if (sig === 'GO' && sig !== lastSig && now > goCooldown) {
       goCooldown = now + 180000;
       await tg(
@@ -282,18 +288,23 @@ async function analyze() {
 
     } else if (sig === 'SOFT GO — รอ MACD Cross' && sig !== lastSig && now > softGoCooldown) {
       softGoCooldown = now + 120000;
+      lastConfAlert = true; // รวม conf alert ไปด้วย
       await tg(
 `⚡ <b>ETH SOFT GO</b>
 
-📊 Confidence: ${conf}% | Trigger: ${trigs.score}/5
+🎯 Direction: <b>${macd1h.positive?'🟢 LONG':'🔴 SHORT'}</b>
+📊 Confidence: <b>${conf}%</b> | Trigger: <b>${trigs.score}/5</b>
 💰 Price: $${p}
 📈 MACD: Positive (รอ Cross)
 📊 OBV: ${obv.positive && obv.slope > 0 ? 'Slope+ ✅' : '❌'}
 🟡 BTC: ${btcBull ? 'Bull ✅' : 'Bear ❌'}
 📉 RSI: ${rsi.toFixed(1)}
+😨 F&G: ${fg} ${fgLabel}
 
 ⏳ รอ MACD Cross ก่อน Entry`, true);
 
+    } else if (sig === 'GO' && sig !== lastSig && now > goCooldown) {
+      // GO รวม conf ด้วย
     } else if (sig === 'NO GO — TRAP DETECTED' && sig !== lastSig) {
       await tg(
 `⛔ <b>ETH TRAP DETECTED</b>
@@ -305,11 +316,9 @@ async function analyze() {
 ❌ งดเทรด รอ Signal ใหม่`, true);
     }
 
-    // Conf ≥ 75% alert ครั้งแรก
+    // Conf ≥ 75% alert — ส่งเฉพาะถ้าไม่ได้รวมไปกับ Signal แล้ว
     if(confOK && !lastConfAlert) {
       lastConfAlert = true;
-      const topDir = conf === Math.max(conf, conf) ?
-        (macd1h.positive ? '🟢 LONG' : '🔴 SHORT') : '—';
       await tg(
 `📊 <b>Confidence ≥ 75%!</b>
 
@@ -467,9 +476,13 @@ server.listen(3000, () => {
 console.log('🚀 ETH Cone Bot v3.0 Started');
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
 
-// แสดง startup message เฉพาะครั้งแรก ไม่แสดงตอน PM2 restart
-const isFirstRun = !process.env.PM2_RESTART_DELAY;
-if(isFirstRun) tg('🚀 <b>ETH Cone Bot v3.0 Online</b> | Oracle 🇸🇬');
+// แสดงครั้งเดียวตอน start — ใช้ flag file
+const fs = require('fs');
+const flagFile = '/home/ubuntu/eth-bot/.started';
+if (!fs.existsSync(flagFile)) {
+  fs.writeFileSync(flagFile, Date.now().toString());
+  tg('🚀 <b>ETH Cone Bot v3.0 Online</b> | Oracle 🇸🇬');
+}
 
 analyze();
 setInterval(analyze, 10000);
