@@ -468,7 +468,7 @@ console.log('🚀 ETH Cone Bot v3.0 Started — Trade Monitor + Signal Alert');
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
 tg(`🚀 <b>ETH Cone Bot v3.0 เริ่มทำงาน!</b>
 
-🧠 Logic = Dashboard v5.13
+🧠 Logic = Dashboard v5.16
 📡 Monitor ทุก 10s | Oracle Cloud 🇸🇬
 🌐 Trade Monitor: รับ TP/SL จาก Dashboard
 ⚡ Gate: Conf ≥75% → Trigger 5 ตัว → GO
