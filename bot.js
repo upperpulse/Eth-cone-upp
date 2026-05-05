@@ -1,11 +1,15 @@
-// ETH Cone Bot v2.0 — Oracle VM
-// Logic เหมือน Dashboard v5.13 ทุกอย่าง
-// Conf gate → Trigger 5 ตัว → GO/SOFT GO/TRAP
+// ETH Cone Bot v3.0 — Oracle VM
+// Token อยู่ใน Environment Variables — ไม่เก็บใน code
 
-const BOT_TOKEN = '8397156356:AAHpIeQYWikPCH2wthqYBWMCMp0sXmFLcMM';
-const CHAT_ID   = '7970078364';
+const BOT_TOKEN = process.env.TG_TOKEN || '';
+const CHAT_ID   = process.env.TG_CHAT  || '';
 const BINANCE   = 'https://fapi.binance.com';
 const FG_API    = 'https://api.alternative.me/fng/?limit=1';
+
+if(!BOT_TOKEN||!CHAT_ID){
+  console.error('❌ ต้องตั้ง TG_TOKEN และ TG_CHAT ใน environment');
+  process.exit(1);
+}
 
 // ── State ──────────────────────────────
 let lastSig = '';
