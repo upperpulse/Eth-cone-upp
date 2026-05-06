@@ -4,3 +4,19 @@
 ทุกครั้งที่แก้ไข index.html และ bump version เช่น v5.19 → v5.20
 ต้อง update บรรทัดแรกของ bot.js ด้วย:
 // ── ETH Cone Bot v3.0 — Dashboard v5.20 ──
+
+── สรุประบบทั้งหมด ──
+Claude      = แก้ code
+GitHub      = เก็บ code
+VM Bot      = รัน 24/7 + sync อัตโนมัติทุก 1 นาที
+Dashboard   = Monitor + สั่งการ
+Telegram    = รับแจ้งเตือน
+
+── Workflow แก้ code ──
+แก้ใน Claude → Download → Upload GitHub → VM sync อัตโนมัติ 1 นาที
+
+── Workflow Trade ──
+Bot แจ้ง Telegram → เปิด Dashboard → ดู Cone
+→ กด Start Trade → ปิด Dashboard
+→ Bot monitor TP/SL/Timeout แทน
+→ Bot แจ้ง result → เปิด Dashboard ดูผล
