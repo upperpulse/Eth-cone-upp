@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '1.0';
+const ETH_LOGIC_VERSION = '1.1';
 
 // ── Indicators ──────────────────────────────────────────────
 function calcEMA(c, n) {
@@ -103,29 +103,40 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap) {
 }
 
 function calcSignal(macd1h, obv, rsi, trap, conf) {
-  const confOK    = conf >= 75;
-  const rsiOS     = rsi < 38;
-  const rsiOB     = rsi > 62;
-  const rsiOK     = (!rsiOB && !rsiOS) || (rsiOS && macd1h.positive) || (rsiOB && !macd1h.positive);
-  const entryDir  = macd1h.positive ? 'long' : 'short';
+  const confOK = conf >= 75;
+  const rsiOS  = rsi < 38;
+  const rsiOB  = rsi > 62;
 
   let sig = 'HOLD';
   let entryReady = false;
+  let entryDir = 'long';
 
   if (!confOK) {
     sig = `HOLD — Conf ต่ำ (${conf}%)`;
   } else if (trap.alert) {
     sig = 'NO GO — TRAP DETECTED';
-  } else if (macd1h.positive && obv.positive && rsiOK) {
-    sig = macd1h.cross ? 'GO' : 'SOFT GO — Entry Ready';
+
+  // ── LONG condition ──────────────────────
+  } else if (macd1h.positive && obv.positive && !rsiOB) {
+    sig = macd1h.cross ? 'GO LONG' : 'SOFT GO — LONG Ready';
+    entryDir = 'long';
     entryReady = true;
+
+  // ── SHORT condition (symmetric) ─────────
+  } else if (!macd1h.positive && !obv.positive && !rsiOS) {
+    sig = (!macd1h.positive && macd1h.hist < 0) ? 'GO SHORT' : 'SOFT GO — SHORT Ready';
+    entryDir = 'short';
+    entryReady = true;
+
   } else if (macd1h.positive && !obv.positive) {
-    sig = 'HOLD — รอ OBV+';
+    sig = 'HOLD — รอ OBV+ (LONG)';
+  } else if (!macd1h.positive && obv.positive) {
+    sig = 'HOLD — รอ OBV- (SHORT)';
   } else {
     sig = 'HOLD — รอ Signal';
   }
 
-  return { sig, entryReady, entryDir, confOK, rsiOK };
+  return { sig, entryReady, entryDir, confOK };
 }
 
 function calcTriggers(macd, obv, btcBull, trap, fg) {
