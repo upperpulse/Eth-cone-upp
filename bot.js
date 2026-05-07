@@ -1,4 +1,4 @@
-// ETH Cone Bot v3.1 — Dashboard v5.19
+// ETH Cone Bot v3.2 — Dashboard v5.19
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 
 const BOT_TOKEN = process.env.TG_TOKEN || '8397156356:AAHpIeQYWikPCH2wthqYBWMCMp0sXmFLcMM';
@@ -205,11 +205,10 @@ async function analyze() {
 
     if(!confOK) sig=`HOLD — Conf ต่ำ (${conf}%)`;
     else if(trap.alert) sig='NO GO — TRAP DETECTED';
-    else if(macd1h.positive && obv.positive && btcBull && rsiOK) {
+    else if(macd1h.positive && obv.positive && rsiOK) {
       sig = macd1h.cross ? 'GO' : 'SOFT GO — Entry Ready';
       entryReady = true;
-    } else if(macd1h.positive && obv.positive && !btcBull) sig='HOLD — BTC ไม่ Align';
-    else if(macd1h.positive && !obv.positive) sig='HOLD — รอ OBV+';
+    } else if(macd1h.positive && !obv.positive) sig='HOLD — รอ OBV+';
     else if(!macd1h.positive && obv.slope<0 && btcBull===false) {
       // SHORT setup
       sig = 'SOFT GO — SHORT Ready';
