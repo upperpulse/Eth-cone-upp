@@ -1,4 +1,4 @@
-// ETH Cone Bot v3.0 — Dashboard v5.19
+// ETH Cone Bot v3.1 — Dashboard v5.19
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 
 const BOT_TOKEN = process.env.TG_TOKEN || '8397156356:AAHpIeQYWikPCH2wthqYBWMCMp0sXmFLcMM';
@@ -52,7 +52,7 @@ async function fetchFG() {
 function calcEMA(c,n){const k=2/(n+1);let e=c[0];for(let i=1;i<c.length;i++)e=c[i]*k+e*(1-k);return e;}
 function calcMACD(c){const h=calcEMA(c,12)-calcEMA(c,26),ph=calcEMA(c.slice(0,-1),12)-calcEMA(c.slice(0,-1),26);return{positive:h>0,cross:h>0&&ph<=0,hist:h};}
 function calcRSI(c,p=14){if(c.length<p+1)return 50;let g=0,l=0;for(let i=1;i<=p;i++){const d=c[i]-c[i-1];d>0?g+=d:l-=d;}let ag=g/p,al=l/p;for(let i=p+1;i<c.length;i++){const d=c[i]-c[i-1];ag=(ag*(p-1)+Math.max(d,0))/p;al=(al*(p-1)+Math.max(-d,0))/p;}return al===0?100:100-100/(1+ag/al);}
-function calcOBV(k){let o=0;const a=[0];for(let i=1;i<k.length;i++){const c=parseFloat(k[i][4]),pc=parseFloat(k[i-1][4]),v=parseFloat(k[i][5]);o+=c>pc?v:c<pc?-v:0;a.push(o);}const r=a.slice(-10);return{positive:o>0,slope:(r[r.length-1]-r[0])/10,divergence:r.slice(-3).every((v,i,a)=>i===0||v<a[i-1])};}
+function calcOBV(k){let o=0;const a=[0];for(let i=1;i<k.length;i++){const c=parseFloat(k[i][4]),pc=parseFloat(k[i-1][4]),v=parseFloat(k[i][5]);o+=c>pc?v:c<pc?-v:0;a.push(o);}const r=a.slice(-5);return{positive:o>0,slope:(r[r.length-1]-r[0])/5,divergence:r.slice(-3).every((v,i,a)=>i===0||v<a[i-1])};}
 function calcATR(k,p=14){const t=[];for(let i=1;i<k.length;i++){const h=parseFloat(k[i][2]),l=parseFloat(k[i][3]),pc=parseFloat(k[i-1][4]);t.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));}return t.slice(-p).reduce((a,b)=>a+b,0)/p;}
 function calcTrap(k,atr){const h=k.map(x=>parseFloat(x[2])),l=k.map(x=>parseFloat(x[3])),v=k.map(x=>parseFloat(x[5]));const last=k[k.length-1],body=Math.abs(parseFloat(last[4])-parseFloat(last[1])),range=parseFloat(last[2])-parseFloat(last[3]),wickR=range>0?(range-body)/range:0,avg=v.slice(-20).reduce((a,b)=>a+b,0)/20,std=Math.sqrt(v.slice(-20).reduce((a,b)=>a+Math.pow(b-avg,2),0)/20),volZ=std>0?(v[v.length-1]-avg)/std:0,sq=(Math.max(...h.slice(-5))-Math.min(...l.slice(-5)))<atr*0.5;let prob=0;if(wickR>0.6)prob+=0.3;if(volZ>2)prob+=0.25;if(sq)prob+=0.3;if(volZ<-1)prob+=0.15;return{prob:Math.min(1,prob),alert:prob>0.6};}
 function calcConf(macd,rsi,obv,btcMacd,fund,trap){let s=60;if(macd.positive)s+=8;if(macd.cross)s+=5;if(obv.positive)s+=5;if(obv.slope>0)s+=2;if(!obv.divergence)s+=2;if(btcMacd.positive)s+=8;if(rsi>40&&rsi<60)s+=3;if(rsi<38)s+=4;if(rsi>65)s-=4;if(rsi>62)s-=2;if(fund<-0.01)s+=2;if(fund>0.01)s-=2;if(trap.alert)s-=15;else if(trap.prob>0.3)s-=5;return Math.min(95,Math.max(50,Math.round(s)));}
@@ -205,11 +205,11 @@ async function analyze() {
 
     if(!confOK) sig=`HOLD — Conf ต่ำ (${conf}%)`;
     else if(trap.alert) sig='NO GO — TRAP DETECTED';
-    else if(macd1h.positive && obv.positive && obv.slope>0 && btcBull && rsiOK) {
+    else if(macd1h.positive && obv.positive && btcBull && rsiOK) {
       sig = macd1h.cross ? 'GO' : 'SOFT GO — Entry Ready';
       entryReady = true;
     } else if(macd1h.positive && obv.positive && !btcBull) sig='HOLD — BTC ไม่ Align';
-    else if(macd1h.positive && (!obv.positive||obv.slope<=0)) sig='HOLD — รอ OBV Slope+';
+    else if(macd1h.positive && !obv.positive) sig='HOLD — รอ OBV+';
     else if(!macd1h.positive && obv.slope<0 && btcBull===false) {
       // SHORT setup
       sig = 'SOFT GO — SHORT Ready';
@@ -229,7 +229,7 @@ async function analyze() {
 
     // ── Manual Notifications ───────────────
     if((sig==='GO'||sig==='SOFT GO — Entry Ready')&&sig!==lastSig&&now>goCooldown){
-      goCooldown=now+180000;lastConfAlert=true;
+      goCooldown=now+7200000;lastConfAlert=true;
       await tg(`${sig==='GO'?'✅':'⚡'} <b>ETH ${sig}</b>\n\n🎯 ${entryDir.toUpperCase()}\n📊 Conf: ${conf}% | Trig: ${trigsScore}/5\n💰 Price: $${p}\n📈 MACD: ${macd1h.cross?'Cross ✅':'Positive'} | OBV: ✅ | BTC: ✅\n📉 RSI: ${rsi.toFixed(1)}\n😨 F&G: ${fg} ${fgL}\n\n🤖 Auto Paper Trade #${autoTrades.length+1}/10 เริ่มแล้ว`,true);
     } else if(sig==='NO GO — TRAP DETECTED'&&sig!==lastSig){
       await tg(`⛔ <b>ETH TRAP</b>\n💰 $${p} | Trap: ${(trap.prob*100).toFixed(0)}%\n❌ งดเทรด`,true);
