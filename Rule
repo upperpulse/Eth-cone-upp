@@ -4,39 +4,50 @@
    แก้ไขทุกครั้ง ให้ update title/version ด้วย
 
 2. VERSION SYNC
-   ทุกครั้งที่แก้ไข index.html และ bump version เช่น v5.19 → v5.20
-   ต้อง update บรรทัดแรกของ bot.js ด้วย:
-   // ETH Cone Bot v3.2 — Dashboard v5.20
+   ทุกครั้งที่ update Dashboard (index.html)
+   ต้อง update version บรรทัดแรกของ bot.js ให้ตรงกัน
+   เช่น: // ETH Cone Bot v3.2 — Dashboard v5.20
 
 3. LOGIC UPDATE
    ทุกครั้งที่แก้ indicator หรือ signal logic
    ต้องแก้ที่ logic.js เท่านั้น
    ห้ามแก้ logic ใน index.html หรือ bot.js โดยตรง
+   เพราะทั้งสองดึง logic มาจาก logic.js
 
-4. FILE STRUCTURE
-   logic.js   = Shared logic (แก้ที่เดียว sync ทั้งคู่)
+4. TEST BEFORE DELIVER ← สำคัญมาก
+   ทุกครั้งที่แก้ code ใดๆ ต้องรันทดสอบก่อนเสมอ
+   โดยใช้ไฟล์จริงทั้งหมดที่ใช้ร่วมกัน:
+   - node -e หรือ node script ทดสอบ logic.js
+   - ตรวจ syntax ด้วย new Function() สำหรับ index.html
+   - ตรวจ require() สำหรับ bot.js
+   ห้ามส่ง code ที่ยังไม่ผ่านการทดสอบ
+
+5. FILE STRUCTURE
+   logic.js   = Shared logic (SSOT)
    index.html = Dashboard (import logic.js)
    bot.js     = VM Bot (require logic.js)
    sync.yml   = GitHub Actions enforce rules
+   Rule       = Rules ทั้งหมด
 
-5. WORKFLOW แก้ code
-   แก้ใน Claude → Download → Upload GitHub → VM sync อัตโนมัติ 1 นาที
+6. WORKFLOW แก้ code
+   แก้ใน Claude → Test → Download → Upload GitHub
+   VM sync อัตโนมัติทุก 1 นาที
    ห้ามแก้ code บน VM โดยตรง
 
-6. WORKFLOW Trade
+7. WORKFLOW Trade
    Bot แจ้ง Telegram → เปิด Dashboard → ดู Cone
    → กด Start Trade → ปิด Dashboard
    → Bot monitor TP/SL/Timeout แทน
    → Bot แจ้ง result → เปิด Dashboard ดูผล
 
-7. SYSTEM INFO
+8. SYSTEM INFO
    VM IP: 161.118.254.4
    ngrok: upcountry-tint-unlucky.ngrok-free.dev
    PM2: eth-bot
    GitHub: upperpulse/Eth-cone-upp
 
-8. สรุประบบ
-   Claude    = แก้ code
+9. สรุประบบ
+   Claude    = แก้ code + Test ก่อนเสมอ
    GitHub    = เก็บ code
    VM Bot    = รัน 24/7 + sync อัตโนมัติทุก 1 นาที
    Dashboard = Monitor + สั่งการ
