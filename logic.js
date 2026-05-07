@@ -17,7 +17,15 @@ function calcEMA(c, n) {
 function calcMACD(closes) {
   const hist = calcEMA(closes, 12) - calcEMA(closes, 26);
   const prevHist = calcEMA(closes.slice(0, -1), 12) - calcEMA(closes.slice(0, -1), 26);
-  return { positive: hist > 0, cross: hist > 0 && prevHist <= 0, hist };
+  const bullCross = hist > 0 && prevHist <= 0; // ขึ้น
+  const bearCross = hist < 0 && prevHist >= 0; // ลง
+  return {
+    positive: hist > 0,
+    cross: bullCross || bearCross, // cross ทั้งสองทิศ
+    bullCross,
+    bearCross,
+    hist
+  };
 }
 
 function calcRSI(closes, period = 14) {
@@ -118,13 +126,13 @@ function calcSignal(macd1h, obv, rsi, trap, conf) {
 
   // ── LONG condition ──────────────────────
   } else if (macd1h.positive && obv.positive && !rsiOB) {
-    sig = macd1h.cross ? 'GO LONG' : 'SOFT GO — LONG Ready';
+    sig = macd1h.bullCross ? 'GO LONG' : 'SOFT GO — LONG Ready';
     entryDir = 'long';
     entryReady = true;
 
-  // ── SHORT condition (symmetric) ─────────
+  // ── SHORT condition (symmetric กับ LONG) ─
   } else if (!macd1h.positive && !obv.positive && !rsiOS) {
-    sig = (!macd1h.positive && macd1h.hist < 0) ? 'GO SHORT' : 'SOFT GO — SHORT Ready';
+    sig = macd1h.bearCross ? 'GO SHORT' : 'SOFT GO — SHORT Ready';
     entryDir = 'short';
     entryReady = true;
 
@@ -140,12 +148,15 @@ function calcSignal(macd1h, obv, rsi, trap, conf) {
 }
 
 function calcTriggers(macd, obv, btcBull, trap, fg) {
-  const t1 = macd.cross || macd.positive;
-  const t2 = obv.positive;
+  const t1 = macd.bullCross || macd.positive || macd.bearCross || !macd.positive;
+  const t2 = obv.positive || !obv.positive; // OBV มีทิศทาง
   const t3 = btcBull;
   const t4 = !trap.alert;
   const t5 = fg > 20 && fg < 80;
-  return { t1, t2, t3, t4, t5, score: [t1,t2,t3,t4,t5].filter(Boolean).length };
+  // นับ trigger ตาม direction
+  const longScore  = [macd.positive, obv.positive, btcBull, t4, t5].filter(Boolean).length;
+  const shortScore = [!macd.positive, !obv.positive, !btcBull, t4, t5].filter(Boolean).length;
+  return { t1, t2, t3, t4, t5, score: Math.max(longScore, shortScore), longScore, shortScore };
 }
 
 // ── Export — รองรับทั้ง Node.js และ Browser ────────────────
