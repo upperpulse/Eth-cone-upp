@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '1.1';
+const ETH_LOGIC_VERSION = '1.2';
 
 // ── Indicators ──────────────────────────────────────────────
 function calcEMA(c, n) {
@@ -93,20 +93,56 @@ function calcTrap(klines, atr) {
 
 function calcConfidence(macd, rsi, obv, btcMacd, funding, trap) {
   let score = 60;
+
+  // ── LONG indicators ─────────────────────
   if (macd.positive)    score += 8;
-  if (macd.cross)       score += 5;
+  if (macd.bullCross)   score += 5;
   if (obv.positive)     score += 5;
   if (obv.slope > 0)    score += 2;
+
+  // ── SHORT indicators (symmetric) ────────
+  if (!macd.positive)   score += 8;
+  if (macd.bearCross)   score += 5;
+  if (!obv.positive)    score += 5;
+  if (obv.slope < 0)    score += 2;
+
+  // ── แต่ไม่นับทั้งสองฝั่งพร้อมกัน ────────
+  // ลบออกฝั่งที่ไม่ตรงกับ MACD direction
+  if (macd.positive) {
+    // LONG mode — ลบ SHORT score ออก
+    if (!macd.positive) score -= 8;  // no-op แต่ explicit
+    if (!obv.positive)  score -= 5;
+    if (obv.slope < 0)  score -= 2;
+  } else {
+    // SHORT mode — ลบ LONG score ออก
+    if (macd.positive)  score -= 8;  // no-op
+    if (obv.positive)   score -= 5;
+    if (obv.slope > 0)  score -= 2;
+  }
+
+  // ── OBV divergence ───────────────────────
   if (!obv.divergence)  score += 2;
-  if (btcMacd.positive) score += 8;
-  if (rsi > 40 && rsi < 60) score += 3;
-  if (rsi < 38)         score += 4;
-  if (rsi > 65)         score -= 4;
-  if (rsi > 62)         score -= 2;
+
+  // ── BTC alignment ───────────────────────
+  if (macd.positive && btcMacd.positive)   score += 8; // LONG + BTC Bull
+  if (!macd.positive && !btcMacd.positive) score += 8; // SHORT + BTC Bear
+
+  // ── RSI ─────────────────────────────────
+  if (rsi > 40 && rsi < 60) score += 3; // neutral = ดีทั้งสองฝั่ง
+  if (rsi < 38 && !macd.positive) score += 4;  // oversold + SHORT = ระวัง
+  if (rsi < 38 && macd.positive)  score += 4;  // oversold + LONG = ดี
+  if (rsi > 65 && macd.positive)  score -= 4;  // overbought + LONG = แย่
+  if (rsi > 65 && !macd.positive) score += 4;  // overbought + SHORT = ดี
+  if (rsi > 62 && macd.positive)  score -= 2;
+
+  // ── Funding ─────────────────────────────
   if (funding < -0.01)  score += 2;
   if (funding > 0.01)   score -= 2;
-  if (trap.alert)       score -= 15;
+
+  // ── Trap ────────────────────────────────
+  if (trap.alert)           score -= 15;
   else if (trap.prob > 0.3) score -= 5;
+
   return Math.min(95, Math.max(50, Math.round(score)));
 }
 
@@ -131,7 +167,7 @@ function calcSignal(macd1h, obv, rsi, trap, conf) {
     entryReady = true;
 
   // ── SHORT condition (symmetric กับ LONG) ─
-  } else if (!macd1h.positive && !obv.positive && !rsiOS) {
+  } else if (!macd1h.positive && !obv.positive && !rsiOB) {
     sig = macd1h.bearCross ? 'GO SHORT' : 'SOFT GO — SHORT Ready';
     entryDir = 'short';
     entryReady = true;
