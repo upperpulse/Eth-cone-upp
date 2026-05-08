@@ -207,6 +207,8 @@ async function analyze() {
 
     // ── Auto Paper Trade trigger ───────────
     if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET) {
+      autoTradeActive = true; // lock ทันทีก่อน await ป้องกัน duplicate
+      lastConfAlert = true;
       await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score);
     }
 
