@@ -1,4 +1,4 @@
-// ETH Cone Bot v3.3 — Dashboard v5.19
+// ETH Cone Bot v3.4 — Dashboard v5.19
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
@@ -301,7 +301,7 @@ const server=http.createServer((req,res)=>{
 server.listen(3000,()=>console.log('🌐 HTTP Server listening on port 3000'));
 
 // ── Start ─────────────────────────────────
-console.log('🚀 ETH Cone Bot v3.3 Started — Auto Paper Trade Mode');
+console.log('🚀 ETH Cone Bot v3.4 Started — Auto Paper Trade Mode');
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
 
 // Load existing auto trades

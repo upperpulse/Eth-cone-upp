@@ -1,38 +1,38 @@
 ── ETH Cone Model Rules ──
 
-1. UPDATE TITLE
+1. UPDATE TITLE ← ทำทุกครั้งก่อนส่งไฟล์
    แก้ไขทุกครั้ง ให้ update title/version ด้วย
+   index.html: <title>ETH Cone vX.XX — nattajoe</title>
+   bot.js บรรทัดแรก: // ETH Cone Bot vX.X — Dashboard vX.XX
+   bot.js startup: console.log('🚀 ETH Cone Bot vX.X Started...')
 
-2. VERSION SYNC
-   ทุกครั้งที่ update Dashboard (index.html)
-   ต้อง update version บรรทัดแรกของ bot.js ให้ตรงกัน
-   เช่น: // ETH Cone Bot v3.2 — Dashboard v5.20
+2. VERSION SYNC ← ทำทุกครั้งก่อนส่งไฟล์
+   Dashboard version ใน index.html ต้องตรงกับ bot.js เสมอ
+   sync.yml จะ reject push ถ้า version ไม่ตรง
 
-3. LOGIC UPDATE
-   ทุกครั้งที่แก้ indicator หรือ signal logic
-   ต้องแก้ที่ logic.js เท่านั้น
-   ห้ามแก้ logic ใน index.html หรือ bot.js โดยตรง
-   เพราะทั้งสองดึง logic มาจาก logic.js
+3. LOGIC UPDATE ← แก้ที่ logic.js เท่านั้น
+   ห้ามแก้ indicator หรือ signal ใน index.html หรือ bot.js โดยตรง
+   logic.js = Single Source of Truth
 
-4. TEST BEFORE DELIVER ← สำคัญมาก
-   ทุกครั้งที่แก้ code ใดๆ ต้องรันทดสอบก่อนเสมอ
-   โดยใช้ไฟล์จริงทั้งหมดที่ใช้ร่วมกัน:
-   - node -e หรือ node script ทดสอบ logic.js
-   - ตรวจ syntax ด้วย new Function() สำหรับ index.html
-   - ตรวจ require() สำหรับ bot.js
+4. TEST BEFORE DELIVER ← ทำทุกครั้งก่อนส่งไฟล์
+   รัน node -e syntax check ทุกไฟล์ก่อนส่งเสมอ
    ห้ามส่ง code ที่ยังไม่ผ่านการทดสอบ
 
 5. FILE STRUCTURE
-   logic.js   = Shared logic (SSOT)
-   index.html = Dashboard (import logic.js)
-   bot.js     = VM Bot (require logic.js)
-   sync.yml   = GitHub Actions enforce rules
-   Rule       = Rules ทั้งหมด
+   logic.js      = Shared logic (SSOT)
+   index.html    = Dashboard (import logic.js)
+   bot.js        = VM Bot (require logic.js)
+   sw.js         = Service Worker (push notifications)
+   manifest.json = PWA config
+   sync.yml      = GitHub Actions enforce rules
+   Rule          = Rules ทั้งหมด
 
 6. WORKFLOW แก้ code
    แก้ใน Claude → Test → Download → Upload GitHub
-   VM sync อัตโนมัติทุก 1 นาที
+   VM sync อัตโนมัติทุก 1 นาที ด้วย MD5 hash check
+   (ไฟล์เปลี่ยนแม้แต่ 1 ตัวอักษร → restart ทันที)
    ห้ามแก้ code บน VM โดยตรง
+   รอ trade จบก่อน upload ถ้า bot กำลัง trade อยู่
 
 7. WORKFLOW Trade
    Bot แจ้ง Telegram → เปิด Dashboard → ดู Cone
@@ -42,12 +42,11 @@
 
 8. SYSTEM INFO
    VM IP: 161.118.254.4
-   ngrok: upcountry-tint-unlucky.ngrok-free.dev
    PM2: eth-bot
    GitHub: upperpulse/Eth-cone-upp
 
 9. สรุประบบ
-   Claude    = แก้ code + Test ก่อนเสมอ
+   Claude    = แก้ code + Test + Update version ก่อนส่งเสมอ
    GitHub    = เก็บ code
    VM Bot    = รัน 24/7 + sync อัตโนมัติทุก 1 นาที
    Dashboard = Monitor + สั่งการ
