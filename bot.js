@@ -2,8 +2,8 @@
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_TOKEN = process.env.TG_TOKEN || '8397156356:AAHpIeQYWikPCH2wthqYBWMCMp0sXmFLcMM';
-const CHAT_ID   = process.env.TG_CHAT  || '7970078364';
+const BOT_TOKEN = process.env.TG_TOKEN || '';
+const CHAT_ID   = process.env.TG_CHAT  || '';
 const BINANCE   = 'https://fapi.binance.com';
 const FG_API    = 'https://api.alternative.me/fng/?limit=1';
 const fs        = require('fs');
