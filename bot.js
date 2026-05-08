@@ -2,6 +2,9 @@
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
+const BOT_VERSION = 'v3.4'; // ← แก้ที่นี่ที่เดียว
+const DASH_VERSION = 'v5.19';
+
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
 const BINANCE   = 'https://fapi.binance.com';
@@ -14,7 +17,7 @@ const { calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSigna
 
 // ── Config ────────────────────────────────
 const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ
-const AUTO_DURATION_MS  = 7200000; // 2H
+const AUTO_DURATION_MS  = 3600000; // 1H
 const AUTO_SIZE         = 100;  // $100
 const ATR_MULT_TP1      = 1.0;  // TP1 = entry ± ATR*1.0
 const ATR_MULT_TP2      = 2.0;  // TP2 = entry ± ATR*2.0
@@ -301,7 +304,7 @@ const server=http.createServer((req,res)=>{
 server.listen(3000,()=>console.log('🌐 HTTP Server listening on port 3000'));
 
 // ── Start ─────────────────────────────────
-console.log('🚀 ETH Cone Bot v3.4 Started — Auto Paper Trade Mode');
+console.log(`🚀 ETH Cone Bot ${BOT_VERSION} Started — Auto Paper Trade Mode`);
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
 
 // Load existing auto trades
@@ -313,7 +316,7 @@ if(savedTrade){tradeState=savedTrade;startTradeMonitor(savedTrade);}
 const flagFile='/home/ubuntu/eth-bot/.started';
 if(!fs.existsSync(flagFile)){
   fs.writeFileSync(flagFile,Date.now().toString());
-  tg(`🚀 <b>ETH Cone Bot v3.0 Online</b>\n\n🤖 Auto Paper Trade: ${autoTrades.length}/${AUTO_TRADE_TARGET} รอบ\n📡 Oracle Cloud 🇸🇬`);
+  tg(`🚀 <b>ETH Cone Bot ${BOT_VERSION} Online</b>\n\n🤖 Auto Paper Trade: ${autoTrades.length}/${AUTO_TRADE_TARGET} รอบ\n📡 Oracle Cloud 🇸🇬`);
 }
 
 let analyzing = false;
