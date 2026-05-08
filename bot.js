@@ -78,7 +78,8 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
   const tradeNum = autoTrades.length + 1;
   const f = v => v.toFixed(2);
 
-  await tg(
+  try {
+    await tg(
 `🤖 <b>Auto Paper Trade #${tradeNum}/10</b>
 
 🎯 Direction: <b>${dir.toUpperCase()}</b>
@@ -87,7 +88,8 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
 💰 Entry: $${f(entry)}
 🎯 TP1: $${f(tp1)} | TP2: $${f(tp2)}
 🛑 SL: $${f(sl)}
-⏱ Duration: 2H`, true);
+⏱ Duration: 1H`, true);
+  } catch(e) { console.log('TG ERROR:', e.message); }
 
   // Monitor loop
   let tp1Hit = false;
