@@ -287,7 +287,12 @@ const server=http.createServer((req,res)=>{
       try{
         const state=JSON.parse(body);
         if(state.action==='start'){startTradeMonitor(state);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));}
-        else if(state.action==='stop'){stopTradeMonitor();tradeState=null;res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));}
+        else if(state.action==='stop'){
+          stopTradeMonitor();tradeState=null;
+          autoTradeActive=false; // reset auto trade ด้วย
+          lastConfAlert=false;
+          res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));
+        }
         else{res.writeHead(400);res.end('Unknown action');}
       }catch(e){res.writeHead(400);res.end('Invalid JSON');}
     });
@@ -302,7 +307,7 @@ const server=http.createServer((req,res)=>{
 server.listen(3000,()=>console.log('🌐 HTTP Server listening on port 3000'));
 
 // ── Start ─────────────────────────────────
-console.log('🚀 ETH Cone Bot v3.0 Started — Auto Paper Trade Mode');
+console.log('🚀 ETH Cone Bot v3.2 Started — Auto Paper Trade Mode');
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
 
 // Load existing auto trades
