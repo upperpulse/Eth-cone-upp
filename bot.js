@@ -316,5 +316,11 @@ if(!fs.existsSync(flagFile)){
   tg(`🚀 <b>ETH Cone Bot v3.0 Online</b>\n\n🤖 Auto Paper Trade: ${autoTrades.length}/${AUTO_TRADE_TARGET} รอบ\n📡 Oracle Cloud 🇸🇬`);
 }
 
+let analyzing = false;
 analyze();
-setInterval(analyze,10000);
+setInterval(async () => {
+  if (analyzing) return; // ป้องกัน analyze ซ้อนกัน
+  analyzing = true;
+  await analyze();
+  analyzing = false;
+}, 10000);
