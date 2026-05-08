@@ -14,7 +14,7 @@ const { calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSigna
 
 // ── Config ────────────────────────────────
 const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ
-const AUTO_DURATION_MS  = 7200000; // 2H
+const AUTO_DURATION_MS  = 3600000; // 1H
 const AUTO_SIZE         = 100;  // $100
 const ATR_MULT_TP1      = 1.0;  // TP1 = entry ± ATR*1.0
 const ATR_MULT_TP2      = 2.0;  // TP2 = entry ± ATR*2.0
@@ -206,7 +206,7 @@ async function analyze() {
     console.log(`[${new Date().toLocaleTimeString('th-TH')}] $${p} Conf:${conf}% RSI:${rsi.toFixed(0)} Trig:${trigs.score}/5 | ${sig} ${autoTradeActive?'[AUTO TRADING]':''}`);
 
     // ── Auto Paper Trade trigger ───────────
-    if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET && sig !== lastSig) {
+    if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET) {
       await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score);
     }
 
