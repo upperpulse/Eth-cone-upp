@@ -12,20 +12,21 @@ jobs:
 
       - name: Check version sync
         run: |
-          # ดึง version จาก index.html
-          DASH_VER=$(grep -o 'v[0-9]*\.[0-9]*' index.html | head -1)
-          # ดึง version จาก bot.js
+          DASH_VER=$(grep -o 'ETH Cone v[0-9]*\.[0-9]*' index.html | head -1 | grep -o 'v[0-9]*\.[0-9]*')
           BOT_VER=$(grep -o 'Dashboard v[0-9]*\.[0-9]*' bot.js | grep -o 'v[0-9]*\.[0-9]*' | head -1)
-          
-          echo "Dashboard version: $DASH_VER"
-          echo "Bot version: $BOT_VER"
-          
+          BOT_START=$(grep -o 'Bot v[0-9]*\.[0-9]*' bot.js | head -1 | grep -o 'v[0-9]*\.[0-9]*')
+
+          echo "Dashboard: $DASH_VER | Bot header: $BOT_VER | Bot startup: $BOT_START"
+
           if [ "$DASH_VER" != "$BOT_VER" ]; then
             echo "❌ Version ไม่ sync! Dashboard=$DASH_VER Bot=$BOT_VER"
-            echo "กรุณา update version ใน bot.js ให้ตรงกับ index.html"
             exit 1
           fi
-          echo "✅ Version sync: $DASH_VER"
+          if [ "$BOT_VER" != "$BOT_START" ]; then
+            echo "❌ Bot startup message ไม่ตรง! Header=$BOT_VER Startup=$BOT_START"
+            exit 1
+          fi
+          echo "✅ Version sync OK: $DASH_VER"
 
       - name: Check logic.js exists
         run: |
@@ -38,12 +39,12 @@ jobs:
       - name: Notify Telegram on success
         if: success()
         run: |
-          DASH_VER=$(grep -o 'v[0-9]*\.[0-9]*' index.html | head -1)
+          DASH_VER=$(grep -o 'ETH Cone v[0-9]*\.[0-9]*' index.html | head -1 | grep -o 'v[0-9]*\.[0-9]*')
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_TOKEN }}/sendMessage" \
             -H "Content-Type: application/json" \
-            -d "{\"chat_id\":\"${{ secrets.TG_CHAT }}\",\"text\":\"✅ ETH Cone Deploy สำเร็จ!\\n\\n📦 Version: $DASH_VER\\n🔄 Logic: Synced\\n⏰ $(date '+%Y-%m-%d %H:%M') ICT\",\"parse_mode\":\"HTML\"}"
+            -d "{\"chat_id\":\"${{ secrets.TG_CHAT }}\",\"text\":\"✅ ETH Cone Deploy สำเร็จ!\\n\\n📦 Dashboard: $DASH_VER\\n🔄 Logic: Synced\\n⏰ $(date '+%Y-%m-%d %H:%M') ICT\",\"parse_mode\":\"HTML\"}"
 
-      - name: Notify Telegram on failure  
+      - name: Notify Telegram on failure
         if: failure()
         run: |
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_TOKEN }}/sendMessage" \
