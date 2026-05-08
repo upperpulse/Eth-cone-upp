@@ -14,7 +14,7 @@ const { calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSigna
 
 // ── Config ────────────────────────────────
 const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ
-const AUTO_DURATION_MS  = 3600000; // 1H
+const AUTO_DURATION_MS  = 7200000; // 2H
 const AUTO_SIZE         = 100;  // $100
 const ATR_MULT_TP1      = 1.0;  // TP1 = entry ± ATR*1.0
 const ATR_MULT_TP2      = 2.0;  // TP2 = entry ± ATR*2.0
@@ -28,8 +28,7 @@ let softGoCooldown = 0;
 let fgCache = { val: 50, ts: 0 };
 let tradeState = null;
 let tradeInterval = null;
-let autoTradeActive = false;
-      lastConfAlert = false; // reset หลัง auto trade จบ // Auto Paper Trade running
+let autoTradeActive = false; // Auto Paper Trade running
 let autoTrades = [];         // ผลทุกรอบ
 
 // ── Telegram ──────────────────────────────
@@ -58,7 +57,6 @@ async function fetchFG() {
 async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
   if (autoTradeActive) return; // รอรอบเก่าจบก่อน
   autoTradeActive = true;
-  lastConfAlert = true; // ไม่แจ้ง conf ขณะ auto trade รัน
 
   const entry = price;
   const qty   = AUTO_SIZE / entry;
@@ -110,7 +108,6 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
     if (now >= endTime) {
       clearInterval(monitor);
       autoTradeActive = false;
-      lastConfAlert = false; // reset หลัง auto trade จบ
       const pnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
       const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TIMEOUT', maxP, maxL, conf };
       autoTrades.push(result);
@@ -124,7 +121,6 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
       if (!tp1Hit && p >= tp1) { tp1Hit = true; await tg(`🎯 Auto #${tradeNum} TP1 HIT $${f(p)}`, true); }
       if (p >= tp2) {
         clearInterval(monitor); autoTradeActive = false;
-      lastConfAlert = false; // reset หลัง auto trade จบ
         const pnl = (p - entry) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
@@ -132,7 +128,6 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
         if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
       } else if (p <= sl) {
         clearInterval(monitor); autoTradeActive = false;
-      lastConfAlert = false; // reset หลัง auto trade จบ
         const pnl = (p - entry) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'SL', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
@@ -143,7 +138,6 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
       if (!tp1Hit && p <= tp1) { tp1Hit = true; await tg(`🎯 Auto #${tradeNum} TP1 HIT $${f(p)}`, true); }
       if (p <= tp2) {
         clearInterval(monitor); autoTradeActive = false;
-      lastConfAlert = false; // reset หลัง auto trade จบ
         const pnl = (entry - p) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
@@ -151,7 +145,6 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
         if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
       } else if (p >= sl) {
         clearInterval(monitor); autoTradeActive = false;
-      lastConfAlert = false; // reset หลัง auto trade จบ
         const pnl = (entry - p) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'SL', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
@@ -193,8 +186,7 @@ ${detail}
 // ── Main Analysis ─────────────────────────
 async function analyze() {
   try {
-    // ไม่ check อะไรเลยถ้า trade รัน (manual หรือ auto)
-    if (tradeState || autoTradeActive) return;
+    if (tradeState) return;
 
     const [ethK,btcK,price,funding,fg] = await Promise.all([fetchKlines('ETHUSDT','1h',80),fetchKlines('BTCUSDT','1h',60),fetchPrice(),fetchFunding(),fetchFG()]);
     const ec=ethK.map(k=>parseFloat(k[4])),bc=btcK.map(k=>parseFloat(k[4]));
@@ -209,7 +201,7 @@ async function analyze() {
 
     // ── Auto Paper Trade trigger ───────────
     if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET) {
-      autoTradeActive = true; // lock ทันทีก่อน await ป้องกัน duplicate
+      autoTradeActive = true; // lock ทันทีก่อน await
       lastConfAlert = true;
       await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score);
     }
@@ -291,7 +283,7 @@ const server=http.createServer((req,res)=>{
         if(state.action==='start'){startTradeMonitor(state);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));}
         else if(state.action==='stop'){
           stopTradeMonitor();tradeState=null;
-          autoTradeActive=false; // reset auto trade ด้วย
+          autoTradeActive=false;
           lastConfAlert=false;
           res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));
         }
