@@ -17,7 +17,7 @@ const path      = require('path');
 const LOGIC_URL  = 'https://raw.githubusercontent.com/upperpulse/Eth-cone-upp/main/logic.js';
 const LOGIC_PATH = path.join(__dirname, 'logic.js');
 
-let calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSignal, calcTriggers;
+let calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSignal, calcTriggers, calcBestDirection;
 
 async function loadLogic() {
   try {
@@ -30,7 +30,6 @@ async function loadLogic() {
   } catch(e) {
     console.log('⚠️ GitHub unavailable, using local logic.js');
   }
-  // ล้าง require cache แล้วโหลดใหม่
   delete require.cache[require.resolve(LOGIC_PATH)];
   const logic = require(LOGIC_PATH);
   calcMACD = logic.calcMACD;
@@ -41,6 +40,7 @@ async function loadLogic() {
   calcConfidence = logic.calcConfidence;
   calcSignal = logic.calcSignal;
   calcTriggers = logic.calcTriggers;
+  calcBestDirection = logic.calcBestDirection;
   console.log(`✅ Logic v${logic.version} ready`);
 }
 
