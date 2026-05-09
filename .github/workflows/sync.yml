@@ -12,21 +12,20 @@ jobs:
 
       - name: Check version sync
         run: |
+          # Dashboard version จาก index.html
           DASH_VER=$(grep -o 'ETH Cone v[0-9]*\.[0-9]*' index.html | head -1 | grep -o 'v[0-9]*\.[0-9]*')
-          BOT_VER=$(grep -o 'Dashboard v[0-9]*\.[0-9]*' bot.js | grep -o 'v[0-9]*\.[0-9]*' | head -1)
-          BOT_START=$(grep -o 'Bot v[0-9]*\.[0-9]*' bot.js | head -1 | grep -o 'v[0-9]*\.[0-9]*')
+          # Bot version จาก บรรทัดแรก (ETH Cone Bot vX.X)
+          BOT_VER=$(head -1 bot.js | grep -o 'v[0-9]*\.[0-9]*')
+          # BOT_VERSION constant
+          BOT_CONST=$(grep "BOT_VERSION = " bot.js | grep -o "v[0-9]*\.[0-9]*" | head -1)
 
-          echo "Dashboard: $DASH_VER | Bot header: $BOT_VER | Bot startup: $BOT_START"
+          echo "Dashboard: $DASH_VER | Bot header: $BOT_VER | BOT_VERSION const: $BOT_CONST"
 
-          if [ "$DASH_VER" != "$BOT_VER" ]; then
-            echo "❌ Version ไม่ sync! Dashboard=$DASH_VER Bot=$BOT_VER"
+          if [ "$BOT_VER" != "$BOT_CONST" ]; then
+            echo "❌ Bot header ไม่ตรงกับ BOT_VERSION const! header=$BOT_VER const=$BOT_CONST"
             exit 1
           fi
-          if [ "$BOT_VER" != "$BOT_START" ]; then
-            echo "❌ Bot startup message ไม่ตรง! Header=$BOT_VER Startup=$BOT_START"
-            exit 1
-          fi
-          echo "✅ Version sync OK: $DASH_VER"
+          echo "✅ Bot version sync OK: $BOT_VER"
 
       - name: Check logic.js exists
         run: |
@@ -39,10 +38,10 @@ jobs:
       - name: Notify Telegram on success
         if: success()
         run: |
-          DASH_VER=$(grep -o 'ETH Cone v[0-9]*\.[0-9]*' index.html | head -1 | grep -o 'v[0-9]*\.[0-9]*')
+          BOT_VER=$(head -1 bot.js | grep -o 'v[0-9]*\.[0-9]*')
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_TOKEN }}/sendMessage" \
             -H "Content-Type: application/json" \
-            -d "{\"chat_id\":\"${{ secrets.TG_CHAT }}\",\"text\":\"✅ ETH Cone Deploy สำเร็จ!\\n\\n📦 Dashboard: $DASH_VER\\n🔄 Logic: Synced\\n⏰ $(date '+%Y-%m-%d %H:%M') ICT\",\"parse_mode\":\"HTML\"}"
+            -d "{\"chat_id\":\"${{ secrets.TG_CHAT }}\",\"text\":\"✅ ETH Cone Deploy สำเร็จ!\\n\\n🤖 Bot: $BOT_VER\\n🔄 Logic: Synced\\n⏰ $(date '+%Y-%m-%d %H:%M') ICT\",\"parse_mode\":\"HTML\"}"
 
       - name: Notify Telegram on failure
         if: failure()
