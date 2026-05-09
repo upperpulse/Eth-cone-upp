@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.8 — Dashboard v5.19
+// ETH Cone Bot v3.9 — Dashboard v5.19
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.8'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.9'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.19';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
