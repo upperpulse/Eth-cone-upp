@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '1.2';
+const ETH_LOGIC_VERSION = '1.6';
 
 // ── Indicators ──────────────────────────────────────────────
 function calcEMA(c, n) {
@@ -95,52 +95,92 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap) {
   let score = 60;
   if (macd.positive) {
     // LONG mode
-    if (macd.positive)    score += 8;
     if (macd.bullCross)   score += 5;
+    score += 8; // MACD positive
     if (obv.positive)     score += 5;
     if (obv.slope > 0)    score += 2;
     if (btcMacd.positive) score += 8;
-    if (rsi < 38)         score += 4;
-    if (rsi > 65)         score -= 4;
-    if (rsi > 62)         score -= 2;
+    if (rsi > 32 && rsi < 55) score += 4; // sweet spot LONG
+    if (rsi < 30)         score -= 12; // extreme oversold = falling knife
+    if (rsi < 35)         score -= 6;  // oversold risky
+    if (rsi > 65)         score -= 6;  // overbought = bad LONG
+    if (rsi > 60)         score -= 3;
   } else {
     // SHORT mode
-    if (!macd.positive)    score += 8;
     if (macd.bearCross)    score += 5;
+    score += 8; // MACD negative
     if (!obv.positive)     score += 5;
     if (obv.slope < 0)     score += 2;
     if (!btcMacd.positive) score += 8;
-    if (rsi > 65)          score += 4;
-    if (rsi < 38)          score -= 4;
+    if (rsi > 45 && rsi < 70) score += 4; // sweet spot SHORT
+    if (rsi < 35)          score -= 8;  // oversold = bounce risk สูง
+    if (rsi < 40)          score -= 4;  // กำลัง oversold
+    if (rsi > 72)          score -= 3;  // overbought = risky SHORT
   }
   if (!obv.divergence)      score += 2;
-  if (rsi > 40 && rsi < 60) score += 3;
+  if (rsi > 40 && rsi < 60) score += 2;
   if (funding < -0.01)      score += 2;
   if (funding > 0.01)       score -= 2;
-  if (trap.alert)           score -= 15;
+  if (trap.alert)           score -= 22;
   else if (trap.prob > 0.3) score -= 5;
   return Math.min(95, Math.max(50, Math.round(score)));
 }
 
-function calcSignal(macd1h, obv, rsi, trap, conf) {
-  const confOK = conf >= 75;
-  const rsiOS  = rsi < 38;
-  const rsiOB  = rsi > 62;
+function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
+  const confOK    = conf >= 75;
+  const rsiOB     = rsi > 62;
+  const goOnly    = options.goOnly || false;     // true = GO cross เท่านั้น
+  const aboveEMA  = options.aboveEMA50 !== undefined ? options.aboveEMA50 : true;
+  const belowEMA  = options.belowEMA50 !== undefined ? options.belowEMA50 : true;
+  const atrOK     = options.atrOK !== undefined ? options.atrOK : true;
+
   let sig = 'HOLD';
   let entryReady = false;
   let entryDir = 'long';
+
   if (!confOK) {
     sig = `HOLD — Conf ต่ำ (${conf}%)`;
   } else if (trap.alert) {
     sig = 'NO GO — TRAP DETECTED';
-  } else if (macd1h.positive && obv.positive && !rsiOB) {
-    sig = macd1h.bullCross ? 'GO LONG' : 'SOFT GO — LONG Ready';
-    entryDir = 'long';
-    entryReady = true;
-  } else if (!macd1h.positive && !obv.positive && !rsiOB) {
-    sig = macd1h.bearCross ? 'GO SHORT' : 'SOFT GO — SHORT Ready';
-    entryDir = 'short';
-    entryReady = true;
+  } else if (!atrOK) {
+    sig = 'HOLD — ATR ต่ำเกิน (Sideways)';
+
+  // ── LONG conditions ──────────────────────
+  } else if (macd1h.positive && obv.positive && !rsiOB && rsi > 28 && aboveEMA) {
+    if (macd1h.bullCross) {
+      sig = 'GO LONG';
+      entryDir = 'long';
+      entryReady = true;
+    } else if (!goOnly) {
+      sig = 'SOFT GO — LONG Ready';
+      entryDir = 'long';
+      entryReady = true;
+    } else {
+      sig = 'HOLD — รอ MACD Cross (LONG)';
+    }
+  } else if (macd1h.positive && obv.positive && rsi <= 28) {
+    sig = 'HOLD — RSI Extreme Oversold';
+  } else if (macd1h.positive && !aboveEMA) {
+    sig = 'HOLD — ราคาต่ำกว่า EMA50 (LONG Risk)';
+
+  // ── SHORT conditions ─────────────────────
+  } else if (!macd1h.positive && !obv.positive && !rsiOB && rsi > 35 && belowEMA) {
+    if (macd1h.bearCross) {
+      sig = 'GO SHORT';
+      entryDir = 'short';
+      entryReady = true;
+    } else if (!goOnly) {
+      sig = 'SOFT GO — SHORT Ready';
+      entryDir = 'short';
+      entryReady = true;
+    } else {
+      sig = 'HOLD — รอ MACD Cross (SHORT)';
+    }
+  } else if (!macd1h.positive && !obv.positive && rsi <= 35) {
+    sig = 'HOLD — RSI Oversold (SHORT Risk)';
+  } else if (!macd1h.positive && belowEMA === false) {
+    sig = 'HOLD — ราคาสูงกว่า EMA50 (SHORT Risk)';
+
   } else if (macd1h.positive && !obv.positive) {
     sig = 'HOLD — รอ OBV+';
   } else if (!macd1h.positive && obv.positive) {
@@ -163,6 +203,61 @@ function calcTriggers(macd, obv, btcBull, trap, fg) {
   return { t1, t2, t3, t4, t5, score: Math.max(longScore, shortScore), longScore, shortScore };
 }
 
+
+// ── Best Direction Selector ──────────────────────────────────────
+// เปรียบเทียบ LONG vs SHORT แล้วเลือก Conf สูงกว่า
+function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
+  const ec = ethKlines.map(k => parseFloat(k[4]));
+  const bc = btcKlines.map(k => parseFloat(k[4]));
+
+  const macd     = calcMACD(ec);
+  const btcMacd  = calcMACD(bc);
+  const rsi      = calcRSI(ec, 14);
+  const obv      = calcOBV(ethKlines);
+  const atr      = calcATR(ethKlines, 14);
+  const ema50    = calcEMA(ec, 50);
+  const ema20    = calcEMA(ec, 20);
+  const price    = ec[ec.length - 1];
+  const aboveEMA50 = price > ema50;  // uptrend
+  const belowEMA50 = price < ema50;  // downtrend
+  // Minimum ATR filter — ไม่เทรดตอน sideways
+  const avgATR   = calcATR(ethKlines, 20);
+  const atrOK    = atr > avgATR * 0.8; // ATR ต้องอยู่ใน active range
+
+  // คำนวณ Conf ทั้งสองฝั่ง
+  const confLong  = calcConfidence(macd, rsi, obv, btcMacd, funding, trap);
+  
+  // จำลอง SHORT — flip MACD และ OBV
+  const macdShort = { ...macd, positive: false, bullCross: false, bearCross: !macd.positive };
+  const obvShort  = { ...obv,  positive: false, slope: -Math.abs(obv.slope) };
+  const confShort = calcConfidence(macdShort, rsi, obvShort, btcMacd, funding, trap);
+
+  // Signal ทั้งสองฝั่ง พร้อม EMA และ ATR filter
+  const opts = { aboveEMA50: aboveEMA50, belowEMA50: belowEMA50, atrOK };
+  const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts});
+  const sigShort = calcSignal(macdShort, obvShort, rsi, trap, confShort, {...opts});
+
+  // เลือก direction ที่ดีกว่า
+  let best = null;
+  if (sigLong.entryReady && sigShort.entryReady) {
+    // ทั้งคู่พร้อม → เลือก Conf สูงกว่า
+    best = confLong >= confShort ? sigLong : sigShort;
+  } else if (sigLong.entryReady) {
+    best = sigLong;
+  } else if (sigShort.entryReady) {
+    best = sigShort;
+  }
+
+  return {
+    macd, obv, rsi, atr, trap, btcMacd,
+    ema50, ema20, price, aboveEMA50, belowEMA50, atrOK,
+    confLong, confShort,
+    sigLong, sigShort,
+    best,
+    fg
+  };
+}
+
 // ── Export — รองรับทั้ง Node.js และ Browser ────────────────
 const ETH_LOGIC = {
   version: ETH_LOGIC_VERSION,
@@ -174,7 +269,8 @@ const ETH_LOGIC = {
   calcTrap,
   calcConfidence,
   calcSignal,
-  calcTriggers
+  calcTriggers,
+  calcBestDirection
 };
 
 // Node.js

@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.4 — Dashboard v5.19
+// ETH Cone Bot v3.8 — Dashboard v5.19
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.4'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.8'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.19';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -11,17 +11,47 @@ const BINANCE   = 'https://fapi.binance.com';
 const FG_API    = 'https://api.alternative.me/fng/?limit=1';
 const fs        = require('fs');
 const http      = require('http');
+const path      = require('path');
 
-// ── Import Shared Logic ───────────────────
-const { calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSignal, calcTriggers } = require('./logic.js');
+// ── Load Logic from GitHub (ตอน startup เท่านั้น) ──
+const LOGIC_URL  = 'https://raw.githubusercontent.com/upperpulse/Eth-cone-upp/main/logic.js';
+const LOGIC_PATH = path.join(__dirname, 'logic.js');
+
+let calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSignal, calcTriggers;
+
+async function loadLogic() {
+  try {
+    const r = await fetch(LOGIC_URL);
+    if (r.ok) {
+      const code = await r.text();
+      fs.writeFileSync(LOGIC_PATH, code);
+      console.log('✅ logic.js loaded from GitHub');
+    }
+  } catch(e) {
+    console.log('⚠️ GitHub unavailable, using local logic.js');
+  }
+  // ล้าง require cache แล้วโหลดใหม่
+  delete require.cache[require.resolve(LOGIC_PATH)];
+  const logic = require(LOGIC_PATH);
+  calcMACD = logic.calcMACD;
+  calcRSI = logic.calcRSI;
+  calcOBV = logic.calcOBV;
+  calcATR = logic.calcATR;
+  calcTrap = logic.calcTrap;
+  calcConfidence = logic.calcConfidence;
+  calcSignal = logic.calcSignal;
+  calcTriggers = logic.calcTriggers;
+  console.log(`✅ Logic v${logic.version} ready`);
+}
 
 // ── Config ────────────────────────────────
 const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ
 const AUTO_DURATION_MS  = 3600000; // 1H
 const AUTO_SIZE         = 100;  // $100
-const ATR_MULT_TP1      = 1.0;  // TP1 = entry ± ATR*1.0
-const ATR_MULT_TP2      = 2.0;  // TP2 = entry ± ATR*2.0
-const ATR_MULT_SL       = 0.8;  // SL  = entry ∓ ATR*0.8
+const ATR_MULT_TP1      = 2.5;  // TP1 = entry ± ATR*2.5
+const ATR_MULT_TP2      = 4.0;  // TP2 = entry ± ATR*4.0
+const ATR_MULT_SL       = 2.0;  // SL  = entry ∓ ATR*2.0
+const TRADE_COOLDOWN_MS = 1800000; // 30 นาที cooldown หลัง trade จบ
 
 // ── State ─────────────────────────────────
 let lastSig = '';
@@ -31,7 +61,8 @@ let softGoCooldown = 0;
 let fgCache = { val: 50, ts: 0 };
 let tradeState = null;
 let tradeInterval = null;
-let autoTradeActive = false; // Auto Paper Trade running
+let autoTradeActive = false;
+let lastTradeEndTime = 0; // cooldown หลัง trade จบ // Auto Paper Trade running
 let autoTrades = [];         // ผลทุกรอบ
 
 // ── Telegram ──────────────────────────────
@@ -111,6 +142,8 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
     if (now >= endTime) {
       clearInterval(monitor);
       autoTradeActive = false;
+      lastTradeEndTime = Date.now(); // เริ่ม cooldown 30 นาที
+      lastConfAlert = false;
       const pnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
       const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TIMEOUT', maxP, maxL, conf };
       autoTrades.push(result);
@@ -123,14 +156,14 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
     if (dir === 'long') {
       if (!tp1Hit && p >= tp1) { tp1Hit = true; await tg(`🎯 Auto #${tradeNum} TP1 HIT $${f(p)}`, true); }
       if (p >= tp2) {
-        clearInterval(monitor); autoTradeActive = false;
+        clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const pnl = (p - entry) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nLONG $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
       } else if (p <= sl) {
-        clearInterval(monitor); autoTradeActive = false;
+        clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const pnl = (p - entry) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'SL', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
@@ -140,14 +173,14 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
     } else {
       if (!tp1Hit && p <= tp1) { tp1Hit = true; await tg(`🎯 Auto #${tradeNum} TP1 HIT $${f(p)}`, true); }
       if (p <= tp2) {
-        clearInterval(monitor); autoTradeActive = false;
+        clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const pnl = (entry - p) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nSHORT $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
       } else if (p >= sl) {
-        clearInterval(monitor); autoTradeActive = false;
+        clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const pnl = (entry - p) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'SL', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
@@ -193,20 +226,35 @@ async function analyze() {
 
     const [ethK,btcK,price,funding,fg] = await Promise.all([fetchKlines('ETHUSDT','1h',80),fetchKlines('BTCUSDT','1h',60),fetchPrice(),fetchFunding(),fetchFG()]);
     const ec=ethK.map(k=>parseFloat(k[4])),bc=btcK.map(k=>parseFloat(k[4]));
-    const macd1h=calcMACD(ec),btcMacd=calcMACD(bc),rsi=calcRSI(ec,14),obv=calcOBV(ethK),atr=calcATR(ethK,14),trap=calcTrap(ethK,atr),btcBull=btcMacd.positive;
-    const conf=calcConfidence(macd1h,rsi,obv,btcMacd,funding,trap);
-    const trigs=calcTriggers(macd1h,obv,btcBull,trap,fg);
-    const {sig,entryReady,entryDir}=calcSignal(macd1h,obv,rsi,trap,conf);
+    // ── เปรียบเทียบทั้งสองฝั่ง เลือก Conf สูงกว่า ──
+    const best    = calcBestDirection(ethK, btcK, funding, trap, fg);
+    const macd1h  = best.macd;
+    const btcMacd = best.btcMacd;
+    const rsi     = best.rsi;
+    const obv     = best.obv;
+    const atr     = best.atr;
+    const trap2   = best.trap;
+    const btcBull = btcMacd.positive;
+    const conf    = best.confLong >= best.confShort ? best.confLong : best.confShort;
+    const trigs   = calcTriggers(macd1h, obv, btcBull, trap2, fg);
+    const sig     = best.best ? best.best.sig : best.sigLong.sig;
+    const entryReady = best.best ? best.best.entryReady : false;
+    const entryDir   = best.best ? best.best.entryDir : 'long';
+    const emaDir  = best.aboveEMA50 ? '↑EMA' : '↓EMA';
 
     const now=Date.now(),p=price.toFixed(2);
     const fgL=fg<=25?'😱 XFear':fg<=45?'😨 Fear':fg<=55?'😐 Neutral':fg<=75?'😊 Greed':'🤑 XGreed';
-    console.log(`[${new Date().toLocaleTimeString('th-TH')}] $${p} Conf:${conf}% RSI:${rsi.toFixed(0)} Trig:${trigs.score}/5 | ${sig} ${autoTradeActive?'[AUTO TRADING]':''}`);
+    console.log(`[${new Date().toLocaleTimeString('th-TH')}] $${p} Conf:${conf}% RSI:${rsi.toFixed(0)} ${emaDir} ATR:${best.atrOK?'✓':'✗'} | ${sig} ${autoTradeActive?'[AUTO TRADING]':''}`);
 
     // ── Auto Paper Trade trigger ───────────
-    if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET) {
-      autoTradeActive = true; // lock ทันทีก่อน await
+    const cooldownOK = Date.now() > lastTradeEndTime + TRADE_COOLDOWN_MS;
+    if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET && cooldownOK) {
+      autoTradeActive = true;
       lastConfAlert = true;
       await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score);
+    } else if(!cooldownOK) {
+      const remain = Math.round((lastTradeEndTime + TRADE_COOLDOWN_MS - Date.now())/60000);
+      if(remain > 0) console.log(`[COOLDOWN] รอ ${remain} นาที`);
     }
 
     // ── Manual Notifications ───────────────
@@ -307,23 +355,28 @@ server.listen(3000,()=>console.log('🌐 HTTP Server listening on port 3000'));
 console.log(`🚀 ETH Cone Bot ${BOT_VERSION} Started — Auto Paper Trade Mode`);
 console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
 
-// Load existing auto trades
-try{const d=fs.readFileSync('/home/ubuntu/eth-bot/auto_trades.json','utf8');autoTrades=JSON.parse(d);console.log(`♻️ Loaded ${autoTrades.length} auto trades`);}catch{}
+(async () => {
+  // โหลด logic.js จาก GitHub ก่อน start
+  await loadLogic();
 
-const savedTrade=loadTradeFile();
-if(savedTrade){tradeState=savedTrade;startTradeMonitor(savedTrade);}
+  // Load existing auto trades
+  try{const d=fs.readFileSync('/home/ubuntu/eth-bot/auto_trades.json','utf8');autoTrades=JSON.parse(d);console.log(`♻️ Loaded ${autoTrades.length} auto trades`);}catch{}
 
-const flagFile='/home/ubuntu/eth-bot/.started';
-if(!fs.existsSync(flagFile)){
-  fs.writeFileSync(flagFile,Date.now().toString());
-  tg(`🚀 <b>ETH Cone Bot ${BOT_VERSION} Online</b>\n\n🤖 Auto Paper Trade: ${autoTrades.length}/${AUTO_TRADE_TARGET} รอบ\n📡 Oracle Cloud 🇸🇬`);
-}
+  const savedTrade=loadTradeFile();
+  if(savedTrade){tradeState=savedTrade;startTradeMonitor(savedTrade);}
 
-let analyzing = false;
-analyze();
-setInterval(async () => {
-  if (analyzing) return; // ป้องกัน analyze ซ้อนกัน
-  analyzing = true;
-  await analyze();
-  analyzing = false;
-}, 10000);
+  const flagFile='/home/ubuntu/eth-bot/.started';
+  if(!fs.existsSync(flagFile)){
+    fs.writeFileSync(flagFile,Date.now().toString());
+    tg(`🚀 <b>ETH Cone Bot ${BOT_VERSION} Online</b>\n\n🤖 Auto Paper Trade: ${autoTrades.length}/${AUTO_TRADE_TARGET} รอบ\n📡 Oracle Cloud 🇸🇬`);
+  }
+
+  let analyzing = false;
+  analyze();
+  setInterval(async () => {
+    if (analyzing) return;
+    analyzing = true;
+    await analyze();
+    analyzing = false;
+  }, 10000);
+})();
