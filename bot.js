@@ -1,4 +1,4 @@
-// ETH Cone Bot v3.10 — Dashboard v5.19
+// ETH Cone Bot v3.10
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
