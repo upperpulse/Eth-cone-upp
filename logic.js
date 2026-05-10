@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '1.6';
+const ETH_LOGIC_VERSION = '1.7';
 
 // ── Indicators ──────────────────────────────────────────────
 function calcEMA(c, n) {
@@ -146,7 +146,8 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
     sig = 'HOLD — ATR ต่ำเกิน (Sideways)';
 
   // ── LONG conditions ──────────────────────
-  } else if (macd1h.positive && obv.positive && !rsiOB && rsi > 28 && aboveEMA) {
+  } else if (macd1h.positive && (obv.positive || obv.slope > 0) && !rsiOB && rsi > 28 && aboveEMA) {
+    // LONG: OBV positive หรือ slope ขึ้น (กำลังดีขึ้น) ก็พอ
     if (macd1h.bullCross) {
       sig = 'GO LONG';
       entryDir = 'long';
@@ -158,13 +159,16 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
     } else {
       sig = 'HOLD — รอ MACD Cross (LONG)';
     }
-  } else if (macd1h.positive && obv.positive && rsi <= 28) {
+  } else if (macd1h.positive && (obv.positive || obv.slope > 0) && rsi <= 28) {
     sig = 'HOLD — RSI Extreme Oversold';
   } else if (macd1h.positive && !aboveEMA) {
     sig = 'HOLD — ราคาต่ำกว่า EMA50 (LONG Risk)';
+  } else if (macd1h.positive && !obv.positive && obv.slope <= 0) {
+    sig = 'HOLD — รอ OBV+ หรือ Slope+';
 
   // ── SHORT conditions ─────────────────────
-  } else if (!macd1h.positive && !obv.positive && !rsiOB && rsi > 35 && belowEMA) {
+  } else if (!macd1h.positive && (!obv.positive || obv.slope < 0) && !rsiOB && rsi > 35 && belowEMA) {
+    // SHORT: OBV negative หรือ slope ลง ก็พอ
     if (macd1h.bearCross) {
       sig = 'GO SHORT';
       entryDir = 'short';
@@ -176,10 +180,12 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
     } else {
       sig = 'HOLD — รอ MACD Cross (SHORT)';
     }
-  } else if (!macd1h.positive && !obv.positive && rsi <= 35) {
+  } else if (!macd1h.positive && (!obv.positive || obv.slope < 0) && rsi <= 35) {
     sig = 'HOLD — RSI Oversold (SHORT Risk)';
   } else if (!macd1h.positive && belowEMA === false) {
     sig = 'HOLD — ราคาสูงกว่า EMA50 (SHORT Risk)';
+  } else if (!macd1h.positive && obv.positive && obv.slope >= 0) {
+    sig = 'HOLD — OBV ยังขึ้น (SHORT Risk)';
 
   } else if (macd1h.positive && !obv.positive) {
     sig = 'HOLD — รอ OBV+';
