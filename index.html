@@ -2512,16 +2512,7 @@ function exportAutoCSV() {
   a.click();
 }
 
-// ── Patch sw() to fetch auto trades when switching to history/analytics ──
-const _swOrig = sw;
-function sw(t) {
-  _swOrig(t);
-  if (t === 'history' || t === 'analytics') {
-    fetchAutoTrades();
-    fetchBotStatus();
-  }
-  if (t === 'trade') fetchBotStatus();
-}
+// ── Auto fetch when tab changes (injected via original sw) ──
 
 // ── Auto refresh bot status every 30s ──
 setInterval(fetchBotStatus, 30000);
