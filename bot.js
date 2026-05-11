@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.11
+// ETH Cone Bot v3.12
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.11'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.12'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.19';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -45,7 +45,8 @@ async function loadLogic() {
 }
 
 // ── Config ────────────────────────────────
-const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ
+const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ (default)
+let AUTO_TRADE_TARGET_DYNAMIC = 10; // ปรับได้จาก Dashboard
 const AUTO_DURATION_MS  = 3600000; // 1H
 const AUTO_SIZE         = 100;  // $100
 const ATR_MULT_TP1      = 0.8;  // TP1 = entry ± ATR*0.8
@@ -149,7 +150,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
       autoTrades.push(result);
       saveAutoTrades();
       await tg(`⏰ <b>Auto Trade #${tradeNum} TIMEOUT</b>\n\n${dir.toUpperCase()} Entry: $${f(entry)} → $${f(p)}\nPnL: ${pnl>=0?'+':''}$${pnl.toFixed(2)}\nMax Profit: +$${maxP.toFixed(2)} | Max Loss: $${maxL.toFixed(2)}`, true);
-      if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
+      if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       return;
     }
 
@@ -161,14 +162,14 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nLONG $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
-        if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
+        if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p <= sl) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const pnl = (p - entry) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'SL', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nLONG $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)}`, true);
-        if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
+        if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       }
     } else {
       if (!tp1Hit && p <= tp1) { tp1Hit = true; await tg(`🎯 Auto #${tradeNum} TP1 HIT $${f(p)}`, true); }
@@ -178,14 +179,14 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nSHORT $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
-        if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
+        if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p >= sl) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const pnl = (entry - p) * qty;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'SL', maxP, maxL, conf };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nSHORT $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)}`, true);
-        if (autoTrades.length >= AUTO_TRADE_TARGET) await sendSummary();
+        if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       }
     }
   }, 10000);
@@ -196,8 +197,14 @@ function saveAutoTrades() {
 }
 
 async function sendSummary() {
-  const wins = autoTrades.filter(t => t.result === 'TP1' || t.result === 'TP2').length;
-  const losses = autoTrades.filter(t => t.result === 'SL').length;
+  const wins = autoTrades.filter(t => 
+    t.result === 'TP1' || t.result === 'TP2' || 
+    (t.result === 'TIMEOUT' && t.pnl > 0)
+  ).length;
+  const losses = autoTrades.filter(t => 
+    t.result === 'SL' || 
+    (t.result === 'TIMEOUT' && t.pnl <= 0)
+  ).length;
   const timeouts = autoTrades.filter(t => t.result === 'TIMEOUT').length;
   const totalPnL = autoTrades.reduce((a, t) => a + t.pnl, 0);
   const winRate = Math.round(wins / autoTrades.length * 100);
@@ -251,7 +258,7 @@ async function analyze() {
 
     // ── Auto Paper Trade trigger ───────────
     const cooldownOK = Date.now() > lastTradeEndTime + TRADE_COOLDOWN_MS;
-    if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET && cooldownOK) {
+    if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK) {
       autoTradeActive = true;
       lastConfAlert = true;
       await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score);

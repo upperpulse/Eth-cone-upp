@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.19 — nattajoe</title>
+<title>ETH Cone v5.20 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -488,6 +488,35 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <!-- TRADE -->
 <div class="tab-content" id="tab-trade">
+<!-- BOT CONTROL PANEL -->
+<div class="card" style="border-color:rgba(168,85,247,.4);margin-bottom:10px;">
+  <div class="ctitle" style="color:var(--purple);">🤖 BOT AUTO TRADE CONTROL</div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+    <div style="flex:1;min-width:120px;">
+      <div style="font-size:8px;color:var(--muted);letter-spacing:2px;margin-bottom:4px;">จำนวนรอบ</div>
+      <div style="display:flex;gap:5px;">
+        <button class="cbtn cy on" id="bt5" onclick="setBotTarget(5)" style="flex:1;font-size:9px;">5</button>
+        <button class="cbtn cy" id="bt10" onclick="setBotTarget(10)" style="flex:1;font-size:9px;">10</button>
+        <button class="cbtn cy" id="bt20" onclick="setBotTarget(20)" style="flex:1;font-size:9px;">20</button>
+        <button class="cbtn cy" id="btCustom" onclick="setBotTarget(0)" style="flex:1;font-size:9px;">✏️</button>
+      </div>
+    </div>
+    <div id="btCustomWrap" style="display:none;flex:1;min-width:100px;">
+      <input id="btCustomVal" type="number" min="1" max="100" placeholder="จำนวนรอบ"
+        style="width:100%;background:var(--dim);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-size:11px;text-align:center;">
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <button class="cbtn gn" onclick="startBotAutoTrade()" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;">▶ START AUTO</button>
+    <button class="cbtn rd" onclick="stopBotAutoTrade()" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;">⏹ STOP</button>
+    <button class="cbtn yw" onclick="resetBotAutoTrade()" style="padding:8px 12px;font-size:10px;">🔄 RESET</button>
+  </div>
+  <div id="botCtrlStatus" style="margin-top:8px;font-size:9px;font-family:'Share Tech Mono',monospace;color:var(--muted);text-align:center;">
+    กำลังเชื่อมต่อ VM...
+  </div>
+</div>
+
+
   <div id="tradeSetup">
     <div class="card cy">
       <div class="ctitle">🎯 PAPER TRADE SETUP</div>
@@ -661,6 +690,24 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <!-- HISTORY -->
 <div class="tab-content" id="tab-history">
+  <!-- AUTO TRADE HISTORY FROM BOT -->
+  <div class="card" style="border-color:rgba(168,85,247,.4);margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div class="ctitle" style="color:var(--purple);">🤖 AUTO TRADE LOG (BOT)</div>
+      <button class="cbtn cy" onclick="fetchAutoTrades()" style="font-size:8px;padding:4px 8px;">🔄 Refresh</button>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="htbl">
+        <thead><tr><th>#</th><th>DIR</th><th>ENTRY</th><th>EXIT</th><th>TP1</th><th>SL</th><th>PnL</th><th>MaxP</th><th>Result</th><th>Outcome</th><th>Conf</th></tr></thead>
+        <tbody id="autoHistBody"><tr><td colspan="11" style="text-align:center;color:var(--muted);padding:16px;">กำลังโหลด...</td></tr></tbody>
+      </table>
+    </div>
+    <div id="autoHistSummary" style="margin-top:8px;font-size:9px;font-family:'Share Tech Mono',monospace;color:var(--muted);"></div>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <button class="cbtn cy" onclick="exportAutoCSV()" style="font-size:8px;padding:5px 10px;">📥 Export CSV</button>
+    </div>
+  </div>
+
   <div class="card cy">
     <div class="ctitle">📋 TRADE LOG</div>
     <div style="overflow-x:auto;">
@@ -679,6 +726,24 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <!-- ANALYTICS -->
 <div class="tab-content" id="tab-analytics">
+  <!-- COMBINED ANALYTICS -->
+  <div class="card" style="border-color:rgba(168,85,247,.4);margin-bottom:10px;">
+    <div class="ctitle" style="color:var(--purple);">🤖 BOT AUTO TRADE STATS</div>
+    <div class="angrid">
+      <div class="anbox"><div class="anlbl">รอบทั้งหมด</div><div class="anval" id="botTotal" style="color:var(--purple);">—</div></div>
+      <div class="anbox"><div class="anlbl">WIN</div><div class="anval" id="botWins" style="color:var(--green);">—</div></div>
+      <div class="anbox"><div class="anlbl">LOSS</div><div class="anval" id="botLoss" style="color:var(--red);">—</div></div>
+      <div class="anbox"><div class="anlbl">WIN RATE</div><div class="anval" id="botWR" style="color:var(--yellow);">—</div></div>
+      <div class="anbox"><div class="anlbl">TOTAL PnL</div><div class="anval" id="botPnl">—</div></div>
+      <div class="anbox"><div class="anlbl">AVG PnL</div><div class="anval" id="botAvg">—</div></div>
+    </div>
+    <div class="card gn" style="margin-top:8px;">
+      <div style="font-size:8px;color:var(--muted);letter-spacing:2px;margin-bottom:4px;">BOT WIN RATE</div>
+      <div class="wr-bar"><div class="wr-fill" id="botWrFill" style="width:0%;background:var(--purple);"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:2px;"><span>0%</span><span id="botWrPct">—</span><span>100%</span></div>
+    </div>
+  </div>
+
   <div class="angrid">
     <div class="anbox"><div class="anlbl">รอบทั้งหมด</div><div class="anval" id="anTotal" style="color:var(--cyan);">0</div></div>
     <div class="anbox"><div class="anlbl">WIN</div><div class="anval" id="anWins" style="color:var(--green);">0</div></div>
@@ -702,7 +767,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.19 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.20 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -2271,6 +2336,196 @@ setInterval(()=>{
 },3600000);
 
 setInterval(tickRef,1000);
+
+
+// ══════════════════════════════════════════
+// BOT CONTROL PANEL
+// ══════════════════════════════════════════
+let botTarget = 5;
+
+function setBotTarget(n) {
+  document.querySelectorAll('#bt5,#bt10,#bt20,#btCustom').forEach(b => b.classList.remove('on'));
+  if (n === 0) {
+    document.getElementById('btCustomWrap').style.display = 'flex';
+    document.getElementById('btCustom').classList.add('on');
+    botTarget = parseInt(document.getElementById('btCustomVal').value) || 10;
+  } else {
+    document.getElementById('btCustomWrap').style.display = 'none';
+    document.getElementById('bt' + n).classList.add('on');
+    botTarget = n;
+  }
+}
+
+async function startBotAutoTrade() {
+  if (!VM_URL) { setBotStatus('❌ ไม่มี VM URL', 'red'); return; }
+  try {
+    const r = await fetch(VM_URL + '/auto-control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ action: 'start', reset: true, target: botTarget })
+    });
+    const d = await r.json();
+    setBotStatus('✅ ' + (d.msg || 'เริ่มแล้ว'), 'green');
+    setTimeout(fetchBotStatus, 2000);
+  } catch(e) { setBotStatus('❌ ไม่สามารถเชื่อมต่อ VM', 'red'); }
+}
+
+async function stopBotAutoTrade() {
+  if (!VM_URL) { setBotStatus('❌ ไม่มี VM URL', 'red'); return; }
+  try {
+    const r = await fetch(VM_URL + '/auto-control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ action: 'stop' })
+    });
+    const d = await r.json();
+    setBotStatus('⏹ ' + (d.msg || 'หยุดแล้ว'), 'yellow');
+  } catch(e) { setBotStatus('❌ ไม่สามารถเชื่อมต่อ VM', 'red'); }
+}
+
+async function resetBotAutoTrade() {
+  if (!confirm('Reset ผล Auto Trade ทั้งหมด?')) return;
+  if (!VM_URL) { setBotStatus('❌ ไม่มี VM URL', 'red'); return; }
+  try {
+    const r = await fetch(VM_URL + '/auto-control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      body: JSON.stringify({ action: 'reset' })
+    });
+    const d = await r.json();
+    setBotStatus('🔄 ' + (d.msg || 'Reset แล้ว'), 'cyan');
+    fetchAutoTrades();
+  } catch(e) { setBotStatus('❌ ไม่สามารถเชื่อมต่อ VM', 'red'); }
+}
+
+function setBotStatus(msg, color) {
+  const el = document.getElementById('botCtrlStatus');
+  if (!el) return;
+  const colors = { green: 'var(--green)', red: 'var(--red)', yellow: 'var(--yellow)', cyan: 'var(--cyan)' };
+  el.style.color = colors[color] || 'var(--muted)';
+  el.textContent = msg;
+}
+
+async function fetchBotStatus() {
+  if (!VM_URL) return;
+  try {
+    const r = await fetch(VM_URL + '/health', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    const status = d.autoTrade ? '🟢 กำลัง Auto Trade' : '⚪ พร้อม';
+    setBotStatus(status + ' | รอบ: ' + d.autoCount + '/' + (d.autoTarget || 10) + ' | ' + (d.sig || ''), d.autoTrade ? 'green' : 'muted');
+  } catch { setBotStatus('❌ ไม่สามารถเชื่อมต่อ VM', 'red'); }
+}
+
+// ══════════════════════════════════════════
+// AUTO TRADE HISTORY
+// ══════════════════════════════════════════
+let autoTradesData = [];
+
+async function fetchAutoTrades() {
+  const tbody = document.getElementById('autoHistBody');
+  const summary = document.getElementById('autoHistSummary');
+  if (!VM_URL) { if(tbody) tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--red);">ไม่มี VM URL</td></tr>'; return; }
+  try {
+    const r = await fetch(VM_URL + '/auto-trades', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    autoTradesData = d.trades || [];
+    renderAutoHistory(autoTradesData);
+    updateBotAnalytics(autoTradesData);
+  } catch(e) {
+    if(tbody) tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--red);">เชื่อมต่อ VM ไม่ได้</td></tr>';
+  }
+}
+
+function renderAutoHistory(trades) {
+  const tbody = document.getElementById('autoHistBody');
+  const summary = document.getElementById('autoHistSummary');
+  if (!tbody) return;
+  if (!trades || trades.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:16px;">ยังไม่มีประวัติ Auto Trade</td></tr>';
+    return;
+  }
+  const rows = trades.map(t => {
+    const outcome = t.outcome || (t.result === 'SL' ? 'LOSS' : t.result === 'TP1' || t.result === 'TP2' ? 'WIN' : t.pnl > 0 ? 'WIN' : 'LOSS');
+    const outcomeColor = outcome === 'WIN' ? 'var(--green)' : 'var(--red)';
+    const pnlColor = t.pnl > 0 ? 'var(--green)' : 'var(--red)';
+    const resColor = t.result === 'TP2' ? 'var(--green)' : t.result === 'TP1' ? 'var(--cyan)' : t.result === 'SL' ? 'var(--red)' : 'var(--yellow)';
+    return `<tr>
+      <td>${t.num}</td>
+      <td style="color:${t.dir==='long'?'var(--green)':'var(--red)'}">${t.dir.toUpperCase()}</td>
+      <td>$${parseFloat(t.entry).toFixed(2)}</td>
+      <td>$${parseFloat(t.exit).toFixed(2)}</td>
+      <td style="color:var(--muted);font-size:9px;">$${parseFloat(t.tp1).toFixed(1)}</td>
+      <td style="color:var(--muted);font-size:9px;">$${parseFloat(t.sl).toFixed(1)}</td>
+      <td style="color:${pnlColor}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td>
+      <td style="color:var(--green);font-size:9px;">+$${t.maxP.toFixed(2)}</td>
+      <td style="color:${resColor}">${t.result}</td>
+      <td style="color:${outcomeColor};font-weight:700;">${outcome}</td>
+      <td style="color:var(--muted)">${t.conf}%</td>
+    </tr>`;
+  }).join('');
+  tbody.innerHTML = rows;
+
+  // Summary
+  const wins = trades.filter(t => (t.outcome||'') === 'WIN' || (t.result==='TP1'||t.result==='TP2') || (t.result==='TIMEOUT'&&t.pnl>0)).length;
+  const total = trades.reduce((a,t) => a+t.pnl, 0);
+  if(summary) summary.innerHTML = `WIN: ${wins}/${trades.length} | Win Rate: ${Math.round(wins/trades.length*100)}% | Total PnL: ${total>=0?'+':''}$${total.toFixed(2)}`;
+}
+
+// ══════════════════════════════════════════
+// BOT ANALYTICS
+// ══════════════════════════════════════════
+function updateBotAnalytics(trades) {
+  if (!trades || trades.length === 0) return;
+  const wins = trades.filter(t => 
+    t.result==='TP1'||t.result==='TP2'||(t.result==='TIMEOUT'&&t.pnl>0)
+  ).length;
+  const losses = trades.length - wins;
+  const total = trades.reduce((a,t) => a+t.pnl, 0);
+  const wr = Math.round(wins/trades.length*100);
+
+  const set = (id,val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+  set('botTotal', trades.length);
+  set('botWins', wins);
+  set('botLoss', losses);
+  set('botWR', wr+'%');
+  const pnlEl = document.getElementById('botPnl');
+  if(pnlEl){ pnlEl.textContent=(total>=0?'+':'')+'$'+total.toFixed(2); pnlEl.style.color=total>=0?'var(--green)':'var(--red)'; }
+  set('botAvg', (total>=0?'+':'')+'$'+(total/trades.length).toFixed(2));
+  const fill = document.getElementById('botWrFill');
+  if(fill) fill.style.width = wr+'%';
+  set('botWrPct', wr+'%');
+}
+
+function exportAutoCSV() {
+  if (!autoTradesData || autoTradesData.length === 0) { alert('ไม่มีข้อมูล'); return; }
+  const hdr = ['#','dir','entry','exit','tp1','tp2','sl','pnl','maxP','maxL','result','outcome','conf','sig'];
+  const rows = autoTradesData.map(t => [
+    t.num,t.dir,t.entry,t.exit,t.tp1,t.tp2,t.sl,
+    t.pnl.toFixed(4),t.maxP.toFixed(4),t.maxL.toFixed(4),
+    t.result,t.outcome||(t.pnl>0?'WIN':'LOSS'),t.conf,
+    '"'+t.sig+'"'
+  ].join(','));
+  const csv = [hdr.join(','), ...rows].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'auto_trades_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();
+}
+
+// ── Patch sw() to fetch auto trades when switching to history/analytics ──
+const _swOrig = sw;
+function sw(t) {
+  _swOrig(t);
+  if (t === 'history' || t === 'analytics') {
+    fetchAutoTrades();
+    fetchBotStatus();
+  }
+  if (t === 'trade') fetchBotStatus();
+}
+
+// ── Auto refresh bot status every 30s ──
+setInterval(fetchBotStatus, 30000);
+
 </script>
 </body>
 </html>
