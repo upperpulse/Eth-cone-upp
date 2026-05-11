@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.10
+// ETH Cone Bot v3.11
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.10'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.11'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.19';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -48,9 +48,9 @@ async function loadLogic() {
 const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ
 const AUTO_DURATION_MS  = 3600000; // 1H
 const AUTO_SIZE         = 100;  // $100
-const ATR_MULT_TP1      = 2.5;  // TP1 = entry ± ATR*2.5
-const ATR_MULT_TP2      = 4.0;  // TP2 = entry ± ATR*4.0
-const ATR_MULT_SL       = 2.0;  // SL  = entry ∓ ATR*2.0
+const ATR_MULT_TP1      = 0.8;  // TP1 = entry ± ATR*0.8
+const ATR_MULT_TP2      = 1.5;  // TP2 = entry ± ATR*1.5
+const ATR_MULT_SL       = 1.5;  // SL  = entry ∓ ATR*1.5
 const TRADE_COOLDOWN_MS = 1800000; // 30 นาที cooldown หลัง trade จบ
 
 // ── State ─────────────────────────────────
