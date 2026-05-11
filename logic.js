@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '1.7';
+const ETH_LOGIC_VERSION = '1.8';
 
 // ── Indicators ──────────────────────────────────────────────
 function calcEMA(c, n) {
@@ -228,7 +228,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
   const belowEMA50 = price < ema50;  // downtrend
   // Minimum ATR filter — ไม่เทรดตอน sideways
   const avgATR   = calcATR(ethKlines, 20);
-  const atrOK    = atr > avgATR * 0.8; // ATR ต้องอยู่ใน active range
+  const atrOK    = atr > avgATR * 0.8 && atr < avgATR * 1.8; // ATR ต้องอยู่ใน active range ไม่ volatile เกิน
 
   // คำนวณ Conf ทั้งสองฝั่ง
   const confLong  = calcConfidence(macd, rsi, obv, btcMacd, funding, trap);
