@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.14
+// ETH Cone Bot v3.16
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.14'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.16'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.21';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -49,6 +49,9 @@ const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ (defa
 let AUTO_TRADE_TARGET_DYNAMIC = 10; // ปรับได้จาก Dashboard
 const AUTO_DURATION_MS  = 7200000; // 2H
 const AUTO_SIZE         = 100;  // $100
+let GLOBAL_SL_AMOUNT    = 0;    // Paper Global SL ($) — 0 = ปิด
+let globalSLActive      = false;
+let dailyPnL            = 0;    // PnL รวมวันนี้
 const ATR_MULT_TP1      = 1.2;  // TP1 = entry ± ATR*1.2
 const ATR_MULT_TP2      = 2.5;  // TP2 = entry ± ATR*2.5
 const ATR_MULT_SL       = 1.0;  // SL  = entry ∓ ATR*1.0
@@ -78,6 +81,83 @@ async function tg(msg, btn = false) {
   } catch (e) { console.error('TG:', e.message); }
 }
 
+
+// ── Telegram Command Handler ──────────────────────────
+const DASH_URL = 'https://upperpulse.github.io/Eth-cone-upp/';
+let lastUpdateId = 0;
+
+async function pollTelegram() {
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${lastUpdateId+1}&timeout=5`);
+    const d = await r.json();
+    if (!d.ok || !d.result.length) return;
+    for (const update of d.result) {
+      lastUpdateId = update.update_id;
+      const msg = update.message;
+      if (!msg || !msg.text) continue;
+      const cmd = msg.text.trim().toLowerCase();
+      const chatId = msg.chat.id.toString();
+
+      if (cmd === '/start' || cmd === '/dashboard') {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: `🚀 <b>ETH Cone Dashboard</b>\n\nกด ปุ่มด้านล่างเพื่อเปิด Dashboard`,
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '📊 เปิด Dashboard', url: DASH_URL },
+                { text: '📈 Trade Now', url: DASH_URL + '?tab=trade' }
+              ]]
+            }
+          })
+        });
+      } else if (cmd === '/status') {
+        const sig = lastSig || 'ยังไม่มีข้อมูล';
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: `📊 <b>Bot Status</b>\n\n🤖 ${BOT_VERSION}\n📡 Auto Trade: ${autoTradeActive ? '🟢 กำลังรัน' : '⚪ พร้อม'}\n📦 รอบ: ${autoTrades.length}/${AUTO_TRADE_TARGET_DYNAMIC}\n💡 Signal: ${sig}\n🛡️ Global SL: ${GLOBAL_SL_AMOUNT > 0 ? '$'+GLOBAL_SL_AMOUNT : 'OFF'}\n💰 Daily PnL: ${dailyPnL >= 0 ? '+' : ''}$${dailyPnL.toFixed(2)}`,
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[{ text: '📊 เปิด Dashboard', url: DASH_URL }]]
+            }
+          })
+        });
+      } else if (cmd === '/stop') {
+        autoTradeActive = false;
+        lastConfAlert = false;
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: '⏹ <b>Auto Trade หยุดแล้ว</b>',
+            parse_mode: 'HTML'
+          })
+        });
+      } else if (cmd === '/help') {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: `📋 <b>Commands</b>\n\n/start — เปิด Dashboard\n/dashboard — เปิด Dashboard\n/status — ดูสถานะ Bot\n/stop — หยุด Auto Trade\n/help — แสดง commands`,
+            parse_mode: 'HTML'
+          })
+        });
+      }
+    }
+  } catch(e) { /* silent */ }
+}
+
+// Poll ทุก 3 วินาที
+setInterval(pollTelegram, 3000);
+
 // ── Fetch ─────────────────────────────────
 async function fetchKlines(sym, iv, lim) { const r = await fetch(`${BINANCE}/fapi/v1/klines?symbol=${sym}&interval=${iv}&limit=${lim}`); return r.json(); }
 async function fetchPrice() { const r = await fetch(`${BINANCE}/fapi/v1/ticker/price?symbol=ETHUSDT`); const d = await r.json(); return parseFloat(d.price); }
@@ -94,7 +174,8 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
   autoTradeActive = true;
 
   const entry = price;
-  const qty   = AUTO_SIZE / entry;
+  const LEVERAGE = 10;
+  const qty   = (AUTO_SIZE * LEVERAGE) / entry;
   const endTime = Date.now() + AUTO_DURATION_MS;
 
   let tp1, tp2, sl;
