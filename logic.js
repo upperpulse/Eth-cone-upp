@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '1.8';
+const ETH_LOGIC_VERSION = '1.9';
 
 // ── Indicators ──────────────────────────────────────────────
 function calcEMA(c, n) {
@@ -152,12 +152,13 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
       sig = 'GO LONG';
       entryDir = 'long';
       entryReady = true;
-    } else if (!goOnly) {
+    } else if (!goOnly && macd1h.hist > 0.0001) {
+      // SOFT GO เฉพาะ MACD hist แข็งแรงพอ
       sig = 'SOFT GO — LONG Ready';
       entryDir = 'long';
       entryReady = true;
     } else {
-      sig = 'HOLD — รอ MACD Cross (LONG)';
+      sig = 'HOLD — รอ MACD แข็งแรงขึ้น (LONG)';
     }
   } else if (macd1h.positive && (obv.positive || obv.slope > 0) && rsi <= 28) {
     sig = 'HOLD — RSI Extreme Oversold';
@@ -173,12 +174,13 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
       sig = 'GO SHORT';
       entryDir = 'short';
       entryReady = true;
-    } else if (!goOnly) {
+    } else if (!goOnly && macd1h.hist < -0.0001) {
+      // SOFT GO เฉพาะ MACD hist แข็งแรงพอ
       sig = 'SOFT GO — SHORT Ready';
       entryDir = 'short';
       entryReady = true;
     } else {
-      sig = 'HOLD — รอ MACD Cross (SHORT)';
+      sig = 'HOLD — รอ MACD แข็งแรงขึ้น (SHORT)';
     }
   } else if (!macd1h.positive && (!obv.positive || obv.slope < 0) && rsi <= 35) {
     sig = 'HOLD — RSI Oversold (SHORT Risk)';

@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.13
+// ETH Cone Bot v3.14
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.13'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.14'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.21';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -49,9 +49,9 @@ const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ (defa
 let AUTO_TRADE_TARGET_DYNAMIC = 10; // ปรับได้จาก Dashboard
 const AUTO_DURATION_MS  = 7200000; // 2H
 const AUTO_SIZE         = 100;  // $100
-const ATR_MULT_TP1      = 0.8;  // TP1 = entry ± ATR*0.8
-const ATR_MULT_TP2      = 1.5;  // TP2 = entry ± ATR*1.5
-const ATR_MULT_SL       = 1.5;  // SL  = entry ∓ ATR*1.5
+const ATR_MULT_TP1      = 1.2;  // TP1 = entry ± ATR*1.2
+const ATR_MULT_TP2      = 2.5;  // TP2 = entry ± ATR*2.5
+const ATR_MULT_SL       = 1.0;  // SL  = entry ∓ ATR*1.0
 const TRADE_COOLDOWN_MS = 1800000; // 30 นาที cooldown หลัง trade จบ
 
 // ── State ─────────────────────────────────
@@ -121,7 +121,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
 💰 Entry: $${f(entry)}
 🎯 TP1: $${f(tp1)} | TP2: $${f(tp2)}
 🛑 SL: $${f(sl)}
-⏱ Duration: 1H`, true);
+⏱ Duration: ${AUTO_DURATION_MS/3600000}H`, true);
   } catch(e) { console.log('TG ERROR:', e.message); }
 
   // Monitor loop
