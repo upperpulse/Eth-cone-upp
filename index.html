@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.24 — nattajoe</title>
+<title>ETH Cone v5.25 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -230,7 +230,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.24</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.25</span></div>
     <div class="brand-sub">OBV15 · RSI30 · NORM.CONF · BTC · F&G·6H · BACKTEST L+S · CSV · nattajoe</div>
   </div>
   <div class="hdr-right">
@@ -544,10 +544,15 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
         style="width:100%;background:var(--dim);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-size:11px;text-align:center;">
     </div>
   </div>
+  <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+    <div style="font-size:8px;color:var(--muted);">เริ่มใหม่:</div>
+    <button id="btnResetOn" class="cbtn rd on" onclick="setBotReset(true)" style="font-size:8px;padding:4px 8px;">🔄 Reset</button>
+    <button id="btnResetOff" class="cbtn cy" onclick="setBotReset(false)" style="font-size:8px;padding:4px 8px;">➕ ต่อเนื่อง</button>
+  </div>
   <div style="display:flex;gap:8px;">
     <button class="cbtn gn" onclick="startBotAutoTrade()" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;">▶ START AUTO</button>
     <button class="cbtn rd" onclick="stopBotAutoTrade()" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;">⏹ STOP</button>
-    <button class="cbtn yw" onclick="resetBotAutoTrade()" style="padding:8px 12px;font-size:10px;">🔄 RESET</button>
+    <button class="cbtn yw" onclick="resetBotAutoTrade()" style="padding:8px 12px;font-size:10px;">🗑️</button>
   </div>
   <div id="botCtrlStatus" style="margin-top:8px;font-size:9px;font-family:'Share Tech Mono',monospace;color:var(--muted);text-align:center;">
     กำลังเชื่อมต่อ VM...
@@ -805,7 +810,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.24 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.25 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -835,7 +840,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 <script src="logic.js"></script>
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.24 — nattajoe
+// ETH CONE ULTIMATE v5.25 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
@@ -1126,7 +1131,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.24 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.25 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1304,7 +1309,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.24
+// BASELINE ENGINE v5.25
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1424,7 +1429,7 @@ async function runEngine(kd){
   // เก็บ base values สำหรับ Live Adjustment
   liveBaseLC=lConf;liveBaseSC=sConf;liveRSI=rsi;
 
-  // Smart Entry Delay — v5.24
+  // Smart Entry Delay — v5.25
   // ลำดับ: Conf ≥ 75% ก่อน → แล้วค่อยตรวจ Trigger
   const macdReady=macd1h.cross||macd1h.positive;
   const macdCross=macd1h.cross;
@@ -1698,7 +1703,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.24 Ready',p:100}];
+    {t:'✅ Baseline v5.25 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   // ตรวจว่าเปิดจาก local file
   const isLocal=location.protocol==='file:'||location.protocol==='content:';
@@ -1737,8 +1742,8 @@ async function reanalyze(){
   try{
     await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
     await update();
-    addLog(`🔄 v5.24 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-    sendNotif('ETH Cone v5.24 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
+    addLog(`🔄 v5.25 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+    sendNotif('ETH Cone v5.25 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
     // บันทึก session ล่าสุด
     saveAnalysisSession();
   }catch(e){
@@ -2282,7 +2287,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.24 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.24',curPrice||2311,'Baseline v5.24 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.25 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.25',curPrice||2311,'Baseline v5.25 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export
@@ -2434,6 +2439,7 @@ setInterval(tickRef,1000);
 // BOT CONTROL PANEL
 // ══════════════════════════════════════════
 let botTarget = 5;
+let botReset = true; // reset trades เมื่อ start
 
 function setBotTarget(n) {
   document.querySelectorAll('#bt5,#bt10,#bt20,#btCustom').forEach(b => b.classList.remove('on'));
@@ -2458,7 +2464,7 @@ async function startBotAutoTrade() {
     const r = await fetch(VM_URL + '/auto-control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      body: JSON.stringify({ action: 'start', reset: true, target: finalTarget })
+      body: JSON.stringify({ action: 'start', reset: botReset, target: finalTarget })
     });
     const d = await r.json();
     setBotStatus('✅ ' + (d.msg || 'เริ่มแล้ว'), 'green');
@@ -2674,6 +2680,12 @@ async function fetchBotStatus() {
   } catch { setBotStatus('❌ ไม่สามารถเชื่อมต่อ VM', 'red'); }
 }
 
+
+function setBotReset(val) {
+  botReset = val;
+  document.getElementById('btnResetOn').classList.toggle('on', val);
+  document.getElementById('btnResetOff').classList.toggle('on', !val);
+}
 </script>
 </body>
 </html>
