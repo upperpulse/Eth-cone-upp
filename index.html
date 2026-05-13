@@ -2450,15 +2450,7 @@ function setBotStatus(msg, color) {
   el.textContent = msg;
 }
 
-async function fetchBotStatus() {
-  if (!VM_URL) return;
-  try {
-    const r = await fetch(VM_URL + '/health', { headers: { 'ngrok-skip-browser-warning': 'true' } });
-    const d = await r.json();
-    const status = d.autoTrade ? '🟢 กำลัง Auto Trade' : '⚪ พร้อม';
-    setBotStatus(status + ' | รอบ: ' + d.autoCount + '/' + (d.autoTarget || 10) + ' | ' + (d.sig || ''), d.autoTrade ? 'green' : 'muted');
-  } catch { setBotStatus('❌ ไม่สามารถเชื่อมต่อ VM', 'red'); }
-}
+
 
 // ══════════════════════════════════════════
 // AUTO TRADE HISTORY
