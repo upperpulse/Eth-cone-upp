@@ -1,9 +1,9 @@
-// ETH Cone Bot v3.16
+// ETH Cone Bot v3.17
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.16'; // ← แก้ที่นี่ที่เดียว
-const DASH_VERSION = 'v5.21';
+const BOT_VERSION = 'v3.17'; // ← แก้ที่นี่ที่เดียว
+const DASH_VERSION = 'v5.24';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
@@ -46,7 +46,8 @@ async function loadLogic() {
 
 // ── Config ────────────────────────────────
 const AUTO_TRADE_TARGET = 10;   // รอบที่ต้องการ (default)
-let AUTO_TRADE_TARGET_DYNAMIC = 10; // ปรับได้จาก Dashboard
+let AUTO_TRADE_TARGET_DYNAMIC = 10;
+let autoTradeEnabled = false; // ปรับได้จาก Dashboard
 const AUTO_DURATION_MS  = 7200000; // 2H
 const AUTO_SIZE         = 100;  // $100
 let GLOBAL_SL_AMOUNT    = 0;    // Paper Global SL ($) — 0 = ปิด
@@ -55,6 +56,8 @@ let dailyPnL            = 0;    // PnL รวมวันนี้
 const ATR_MULT_TP1      = 1.2;  // TP1 = entry ± ATR*1.2
 const ATR_MULT_TP2      = 2.5;  // TP2 = entry ± ATR*2.5
 const ATR_MULT_SL       = 1.0;  // SL  = entry ∓ ATR*1.0
+const TRAIL_BREAKEVEN   = 0.5;   // ขยับ SL → breakeven เมื่อ maxP > TP1×50%
+const TRAIL_LOCK        = 1.0;   // ขยับ SL → TP1×50% เมื่อ maxP > TP1×100%
 const TRADE_COOLDOWN_MS = 1800000; // 30 นาที cooldown หลัง trade จบ
 
 // ── State ─────────────────────────────────
@@ -194,7 +197,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
 
   try {
     await tg(
-`🤖 <b>Auto Paper Trade #${tradeNum}/10</b>
+`🤖 <b>Auto Paper Trade #${tradeNum}/${AUTO_TRADE_TARGET_DYNAMIC}</b>
 
 🎯 Direction: <b>${dir.toUpperCase()}</b>
 📊 Signal: ${sig}
@@ -339,7 +342,7 @@ async function analyze() {
 
     // ── Auto Paper Trade trigger ───────────
     const cooldownOK = Date.now() > lastTradeEndTime + TRADE_COOLDOWN_MS;
-    if(entryReady && !autoTradeActive && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK) {
+    if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK) {
       autoTradeActive = true;
       lastConfAlert = true;
       await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score);
@@ -351,7 +354,7 @@ async function analyze() {
     // ── Manual Notifications ───────────────
     if((sig==='GO'||sig==='SOFT GO — Entry Ready')&&sig!==lastSig&&now>goCooldown){
       goCooldown=now+7200000;lastConfAlert=true;
-      await tg(`${sig==='GO'?'✅':'⚡'} <b>ETH ${sig}</b>\n\n🎯 ${entryDir.toUpperCase()}\n📊 Conf: ${conf}% | Trig: ${trigs.score}/5\n💰 Price: $${p}\n📈 MACD: ${macd1h.cross?'Cross ✅':'Positive'} | OBV: ✅ | BTC: ✅\n📉 RSI: ${rsi.toFixed(1)}\n😨 F&G: ${fg} ${fgL}\n\n🤖 Auto Paper Trade #${autoTrades.length+1}/10 เริ่มแล้ว`,true);
+      await tg(`${sig==='GO'?'✅':'⚡'} <b>ETH ${sig}</b>\n\n🎯 ${entryDir.toUpperCase()}\n📊 Conf: ${conf}% | Trig: ${trigs.score}/5\n💰 Price: $${p}\n📈 MACD: ${macd1h.cross?'Cross ✅':'Positive'} | OBV: ✅ | BTC: ✅\n📉 RSI: ${rsi.toFixed(1)}\n😨 F&G: ${fg} ${fgL}\n\n🤖 Auto Paper Trade #${autoTrades.length+1}/${AUTO_TRADE_TARGET_DYNAMIC} เริ่มแล้ว`,true);
     } else if(sig==='NO GO — TRAP DETECTED'&&sig!==lastSig){
       await tg(`⛔ <b>ETH TRAP</b>\n💰 $${p} | Trap: ${(trap.prob*100).toFixed(0)}%\n❌ งดเทรด`,true);
     }
@@ -434,11 +437,37 @@ const server=http.createServer((req,res)=>{
     });
   }else if(req.method==='GET'&&req.url==='/health'){
     res.writeHead(200,{'Content-Type':'application/json'});
-    res.end(JSON.stringify({ok:true,trade:!!tradeState,autoTrade:autoTradeActive,autoCount:autoTrades.length,sig:lastSig}));
+    res.end(JSON.stringify({ok:true,trade:!!tradeState,autoTrade:autoTradeActive,autoCount:autoTrades.length,autoTarget:AUTO_TRADE_TARGET_DYNAMIC,autoEnabled:autoTradeEnabled,sig:lastSig}));
   }else if(req.method==='GET'&&req.url==='/auto-trades'){
     res.writeHead(200,{'Content-Type':'application/json'});
     res.end(JSON.stringify(autoTrades));
-  }else{res.writeHead(404);res.end('Not found');}
+  }else if(req.method==='POST'&&req.url==='/global-sl'){
+    let body='';req.on('data',d=>body+=d);req.on('end',()=>{
+      try{
+        const c=JSON.parse(body);
+        if(typeof c.amount==='number'){
+          GLOBAL_SL_AMOUNT=c.amount;globalSLActive=false;dailyPnL=0;
+          res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+          res.end(JSON.stringify({ok:true,msg:'Global SL: $'+c.amount}));
+        }else if(c.reset){
+          globalSLActive=false;dailyPnL=0;
+          res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+          res.end(JSON.stringify({ok:true,msg:'Reset แล้ว'}));
+        }else{res.writeHead(400);res.end('err');}
+      }catch(e){res.writeHead(400);res.end('err');}
+    });
+  }else if(req.method==='POST'&&req.url==='/auto-control'){
+  let body='';req.on('data',d=>body+=d);req.on('end',()=>{
+    try{
+      const c=JSON.parse(body);
+      if(c.action==='stop'){autoTradeActive=false;lastConfAlert=false;}
+      else if(c.action==='reset'){autoTrades=[];autoTradeActive=false;lastConfAlert=false;lastTradeEndTime=0;try{require('fs').unlinkSync('/home/ubuntu/eth-bot/auto_trades.json');}catch{}}
+      else if(c.action==='start'){if(c.reset){autoTrades=[];try{require('fs').unlinkSync('/home/ubuntu/eth-bot/auto_trades.json');}catch{}}if(c.target)AUTO_TRADE_TARGET_DYNAMIC=parseInt(c.target);autoTradeEnabled=true;autoTradeActive=false;lastConfAlert=false;lastTradeEndTime=0;}
+      res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+      res.end(JSON.stringify({ok:true,msg:'done'}));
+    }catch(e){res.writeHead(400);res.end(JSON.stringify({ok:false}));}
+  });
+}else{res.writeHead(404);res.end('Not found');}
 });
 server.listen(3000,()=>console.log('🌐 HTTP Server listening on port 3000'));
 
