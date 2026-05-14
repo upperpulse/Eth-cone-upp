@@ -1,9 +1,9 @@
-// ETH Cone Bot v3.17
+// ETH Cone Bot v3.18
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.17'; // ← แก้ที่นี่ที่เดียว
-const DASH_VERSION = 'v5.24';
+const BOT_VERSION = 'v3.18'; // ← แก้ที่นี่ที่เดียว
+const DASH_VERSION = 'v5.28';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
@@ -53,9 +53,9 @@ const AUTO_SIZE         = 100;  // $100
 let GLOBAL_SL_AMOUNT    = 0;    // Paper Global SL ($) — 0 = ปิด
 let globalSLActive      = false;
 let dailyPnL            = 0;    // PnL รวมวันนี้
-const ATR_MULT_TP1      = 1.2;  // TP1 = entry ± ATR*1.2
-const ATR_MULT_TP2      = 2.5;  // TP2 = entry ± ATR*2.5
-const ATR_MULT_SL       = 1.0;  // SL  = entry ∓ ATR*1.0
+const ATR_MULT_TP1      = 1.5;  // TP1 = entry ± ATR*1.5
+const ATR_MULT_TP2      = 3.0;  // TP2 = entry ± ATR*3.0
+const ATR_MULT_SL       = 0.75; // SL  = entry ∓ ATR*0.75
 const TRAIL_BREAKEVEN   = 0.5;   // ขยับ SL → breakeven เมื่อ maxP > TP1×50%
 const TRAIL_LOCK        = 1.0;   // ขยับ SL → TP1×50% เมื่อ maxP > TP1×100%
 const TRADE_COOLDOWN_MS = 1800000; // 30 นาที cooldown หลัง trade จบ
@@ -223,6 +223,19 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
     if (pnlNow > maxP) maxP = pnlNow;
     if (pnlNow < maxL) maxL = pnlNow;
 
+    // ── Trailing SL ───────────────────────
+    const tp1dist = Math.abs(tp1 - entry);
+    const tp1pnl  = tp1dist * qty;
+    if (maxP >= tp1pnl * TRAIL_BREAKEVEN) {
+      if (dir === 'long'  && sl < entry) { sl = entry; }
+      if (dir === 'short' && sl > entry) { sl = entry; }
+    }
+    if (maxP >= tp1pnl * TRAIL_LOCK) {
+      const lockPrice = dir === 'long' ? entry + tp1dist * 0.5 : entry - tp1dist * 0.5;
+      if (dir === 'long'  && sl < lockPrice) { sl = lockPrice; }
+      if (dir === 'short' && sl > lockPrice) { sl = lockPrice; }
+    }
+
     // Check timeout
     if (now >= endTime) {
       clearInterval(monitor);
@@ -278,6 +291,23 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
 
 function saveAutoTrades() {
   try { fs.writeFileSync('/home/ubuntu/eth-bot/auto_trades.json', JSON.stringify(autoTrades, null, 2)); } catch {}
+  // บันทึก archive ทุกครั้ง
+  saveArchive();
+}
+
+function saveArchive() {
+  try {
+    const archivePath = '/home/ubuntu/eth-bot/auto_trades_archive.json';
+    let archive = [];
+    try { archive = JSON.parse(fs.readFileSync(archivePath, 'utf8')); } catch {}
+    // เพิ่มหรืออัปเดต trade ล่าสุด
+    autoTrades.forEach(t => {
+      const idx = archive.findIndex(a => a.ts === t.ts || (a.num === t.num && a.entry === t.entry));
+      if (idx === -1) archive.push({...t, ts: Date.now()});
+      else archive[idx] = {...t, ts: archive[idx].ts};
+    });
+    fs.writeFileSync(archivePath, JSON.stringify(archive, null, 2));
+  } catch {}
 }
 
 async function sendSummary() {
@@ -359,7 +389,7 @@ async function analyze() {
       await tg(`⛔ <b>ETH TRAP</b>\n💰 $${p} | Trap: ${(trap.prob*100).toFixed(0)}%\n❌ งดเทรด`,true);
     }
 
-    if(conf>=75&&!lastConfAlert&&!tradeState){
+    if(conf>=82&&!lastConfAlert&&!tradeState){
       lastConfAlert=true;
       await tg(`📊 <b>Confidence ≥ 75%!</b>\n\n🎯 ${macd1h.positive?'🟢 LONG':'🔴 SHORT'}\n📊 Conf: ${conf}% | Trig: ${trigs.score}/5\n💰 $${p} | RSI: ${rsi.toFixed(1)}\n😨 F&G: ${fg} ${fgL}\n\nระบบเริ่มตรวจ Trigger`,true);
     }
@@ -438,9 +468,11 @@ const server=http.createServer((req,res)=>{
   }else if(req.method==='GET'&&req.url==='/health'){
     res.writeHead(200,{'Content-Type':'application/json'});
     res.end(JSON.stringify({ok:true,trade:!!tradeState,autoTrade:autoTradeActive,autoCount:autoTrades.length,autoTarget:AUTO_TRADE_TARGET_DYNAMIC,autoEnabled:autoTradeEnabled,sig:lastSig}));
+  }else if(req.method==='GET'&&req.url==='/auto-archive'){
+    try{const d=fs.readFileSync('/home/ubuntu/eth-bot/auto_trades_archive.json','utf8');res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});res.end(d);}catch{res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});res.end('[]');}
   }else if(req.method==='GET'&&req.url==='/auto-trades'){
-    res.writeHead(200,{'Content-Type':'application/json'});
-    res.end(JSON.stringify(autoTrades));
+    res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+    res.end(JSON.stringify({ok:true,trades:autoTrades,count:autoTrades.length}));
   }else if(req.method==='POST'&&req.url==='/global-sl'){
     let body='';req.on('data',d=>body+=d);req.on('end',()=>{
       try{
