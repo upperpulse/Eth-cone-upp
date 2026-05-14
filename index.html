@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.25 — nattajoe</title>
+<title>ETH Cone v5.26 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -230,7 +230,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.25</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.26</span></div>
     <div class="brand-sub">OBV15 · RSI30 · NORM.CONF · BTC · F&G·6H · BACKTEST L+S · CSV · nattajoe</div>
   </div>
   <div class="hdr-right">
@@ -733,6 +733,24 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <!-- HISTORY -->
 <div class="tab-content" id="tab-history">
+  <!-- AUTO TRADE ARCHIVE -->
+  <div class="card" style="border-color:rgba(234,179,8,.3);margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div class="ctitle" style="color:var(--yellow);">📦 AUTO TRADE ARCHIVE</div>
+      <div style="display:flex;gap:5px;">
+        <button class="cbtn cy" onclick="showArchive()" style="font-size:8px;padding:4px 8px;">📂 ดู</button>
+        <button class="cbtn rd" onclick="clearArchive()" style="font-size:8px;padding:4px 8px;">🗑️</button>
+      </div>
+    </div>
+    <div id="archiveSummary" style="font-size:9px;color:var(--muted);font-family:'Share Tech Mono',monospace;margin-bottom:6px;">กำลังโหลด...</div>
+    <div style="overflow-x:auto;display:none;" id="archiveTable">
+      <table class="htbl">
+        <thead><tr><th>Round</th><th>#</th><th>DIR</th><th>ENTRY</th><th>PnL</th><th>Result</th><th>Outcome</th></tr></thead>
+        <tbody id="archiveBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- AUTO TRADE HISTORY FROM BOT -->
   <div class="card" style="border-color:rgba(168,85,247,.4);margin-bottom:10px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -810,7 +828,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.25 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.26 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -840,13 +858,13 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 <script src="logic.js"></script>
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.25 — nattajoe
+// ETH CONE ULTIMATE v5.26 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
 //        RSI warm-up, F&G 6H cache, CSV Export
 // ═══════════════════════════════════════
-const BASE='https://fapi.binance.com',SYM='ETHUSDT',LKEY='eth_cone_v5_log',SKEY='eth_cone_session_v5';
+const BASE='https://fapi.binance.com',SYM='ETHUSDT',LKEY='eth_cone_v5_log',SKEY='eth_cone_session_v5',AKEY='eth_cone_auto_archive';
 
 // ── STATE ──
 let soundOn=true,notifGranted=false,curPrice=0,sigma=52,atrVal=52;
@@ -1131,7 +1149,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.25 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.26 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1309,7 +1327,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.25
+// BASELINE ENGINE v5.26
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1429,7 +1447,7 @@ async function runEngine(kd){
   // เก็บ base values สำหรับ Live Adjustment
   liveBaseLC=lConf;liveBaseSC=sConf;liveRSI=rsi;
 
-  // Smart Entry Delay — v5.25
+  // Smart Entry Delay — v5.26
   // ลำดับ: Conf ≥ 75% ก่อน → แล้วค่อยตรวจ Trigger
   const macdReady=macd1h.cross||macd1h.positive;
   const macdCross=macd1h.cross;
@@ -1703,7 +1721,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.25 Ready',p:100}];
+    {t:'✅ Baseline v5.26 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   // ตรวจว่าเปิดจาก local file
   const isLocal=location.protocol==='file:'||location.protocol==='content:';
@@ -1742,8 +1760,8 @@ async function reanalyze(){
   try{
     await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
     await update();
-    addLog(`🔄 v5.25 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-    sendNotif('ETH Cone v5.25 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
+    addLog(`🔄 v5.26 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+    sendNotif('ETH Cone v5.26 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
     // บันทึก session ล่าสุด
     saveAnalysisSession();
   }catch(e){
@@ -2287,7 +2305,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.25 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.25',curPrice||2311,'Baseline v5.25 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.26 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.26',curPrice||2311,'Baseline v5.26 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export
@@ -2686,6 +2704,93 @@ function setBotReset(val) {
   document.getElementById('btnResetOn').classList.toggle('on', val);
   document.getElementById('btnResetOff').classList.toggle('on', !val);
 }
+
+// ══════════════════════════════════════════
+// AUTO TRADE ARCHIVE
+// ══════════════════════════════════════════
+
+function loadArchive() {
+  try { return JSON.parse(localStorage.getItem(AKEY) || '[]'); } catch { return []; }
+}
+
+function saveArchive(data) {
+  try { localStorage.setItem(AKEY, JSON.stringify(data)); } catch {}
+}
+
+function archiveTrades(trades, label) {
+  if (!trades || trades.length === 0) return;
+  const archive = loadArchive();
+  const wins = trades.filter(t => t.result==='TP1'||t.result==='TP2'||(t.result==='TIMEOUT'&&t.pnl>0)).length;
+  const total = trades.reduce((a,t)=>a+t.pnl, 0);
+  archive.push({
+    round: archive.length + 1,
+    label: label || new Date().toLocaleDateString('th-TH'),
+    ts: Date.now(),
+    trades,
+    wins,
+    total: +total.toFixed(2),
+    wr: Math.round(wins/trades.length*100)
+  });
+  saveArchive(archive);
+  updateArchiveSummary();
+}
+
+function updateArchiveSummary() {
+  const archive = loadArchive();
+  const el = document.getElementById('archiveSummary');
+  if (!el) return;
+  if (archive.length === 0) { el.textContent = 'ยังไม่มี archive'; return; }
+  const totalWins = archive.reduce((a,r)=>a+r.wins, 0);
+  const totalTrades = archive.reduce((a,r)=>a+r.trades.length, 0);
+  const totalPnL = archive.reduce((a,r)=>a+r.total, 0);
+  el.innerHTML = archive.length+' rounds | '+totalTrades+' trades | WR:'+Math.round(totalWins/totalTrades*100)+'% | PnL: '+(totalPnL>=0?'+':'')+'$'+totalPnL.toFixed(2);
+}
+
+function showArchive() {
+  const archive = loadArchive();
+  const table = document.getElementById('archiveTable');
+  const tbody = document.getElementById('archiveBody');
+  if (!table || !tbody) return;
+  table.style.display = table.style.display === 'none' ? 'block' : 'none';
+  if (table.style.display === 'none') return;
+  tbody.innerHTML = archive.map(r => 
+    r.trades.map(t => {
+      const outcome = t.result==='TP1'||t.result==='TP2' ? 'WIN' : t.result==='SL' ? 'LOSS' : t.pnl>0?'WIN':'LOSS';
+      return `<tr>
+        <td style="color:var(--yellow)">${r.round}</td>
+        <td>${t.num}</td>
+        <td style="color:${t.dir==='long'?'var(--green)':'var(--red)'}">${t.dir.toUpperCase()}</td>
+        <td>$${parseFloat(t.entry).toFixed(1)}</td>
+        <td style="color:${t.pnl>=0?'var(--green)':'var(--red)'}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td>
+        <td>${t.result}</td>
+        <td style="color:${outcome==='WIN'?'var(--green)':'var(--red)'};font-weight:700">${outcome}</td>
+      </tr>`;
+    }).join('')
+  ).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--muted)">ยังไม่มี archive</td></tr>';
+}
+
+function clearArchive() {
+  if (!confirm('ลบ archive ทั้งหมด?')) return;
+  localStorage.removeItem(AKEY);
+  updateArchiveSummary();
+  const table = document.getElementById('archiveTable');
+  if (table) table.style.display = 'none';
+}
+
+// Archive ก่อน reset
+const _origResetBotAutoTrade = resetBotAutoTrade;
+async function resetBotAutoTrade() {
+  // archive trades ปัจจุบันก่อน
+  if (autoTradesData && autoTradesData.length > 0) {
+    archiveTrades(autoTradesData, 'Round '+new Date().toLocaleString('th-TH'));
+  }
+  await _origResetBotAutoTrade();
+}
+
+// Load archive summary on start
+document.addEventListener('DOMContentLoaded', () => setTimeout(updateArchiveSummary, 500));
+setInterval(updateArchiveSummary, 60000);
+
 </script>
 </body>
 </html>
