@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.18
+// ETH Cone Bot v3.19
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.18'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.19'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.28';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -177,7 +177,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
   autoTradeActive = true;
 
   const entry = price;
-  const LEVERAGE = 10;
+  const LEVERAGE = 3;
   const qty   = (AUTO_SIZE * LEVERAGE) / entry;
   const endTime = Date.now() + AUTO_DURATION_MS;
 
@@ -372,7 +372,8 @@ async function analyze() {
 
     // ── Auto Paper Trade trigger ───────────
     const cooldownOK = Date.now() > lastTradeEndTime + TRADE_COOLDOWN_MS;
-    if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK) {
+
+    if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK ) {
       autoTradeActive = true;
       lastConfAlert = true;
       await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score);
@@ -389,9 +390,9 @@ async function analyze() {
       await tg(`⛔ <b>ETH TRAP</b>\n💰 $${p} | Trap: ${(trap.prob*100).toFixed(0)}%\n❌ งดเทรด`,true);
     }
 
-    if(conf>=82&&!lastConfAlert&&!tradeState){
+    if(conf>=80&&!lastConfAlert&&!tradeState){
       lastConfAlert=true;
-      await tg(`📊 <b>Confidence ≥ 75%!</b>\n\n🎯 ${macd1h.positive?'🟢 LONG':'🔴 SHORT'}\n📊 Conf: ${conf}% | Trig: ${trigs.score}/5\n💰 $${p} | RSI: ${rsi.toFixed(1)}\n😨 F&G: ${fg} ${fgL}\n\nระบบเริ่มตรวจ Trigger`,true);
+      await tg(`📊 <b>Confidence ≥ 80%!</b>\n\n🎯 ${macd1h.positive?'🟢 LONG':'🔴 SHORT'}\n📊 Conf: ${conf}% | Trig: ${trigs.score}/5\n💰 $${p} | RSI: ${rsi.toFixed(1)}\n😨 F&G: ${fg} ${fgL}\n\nระบบเริ่มตรวจ Trigger`,true);
     }
     lastSig=sig;
   } catch(e){console.error('Analyze error:',e.message);}

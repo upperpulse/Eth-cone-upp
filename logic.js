@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '1.9';
+const ETH_LOGIC_VERSION = '2.0';
 
 // ── Indicators ──────────────────────────────────────────────
 function calcEMA(c, n) {
@@ -127,7 +127,7 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap) {
 }
 
 function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
-  const confOK    = conf >= 75;
+  const confOK    = conf >= 80;
   const rsiOB     = rsi > 62;
   const goOnly    = options.goOnly || false;     // true = GO cross เท่านั้น
   const aboveEMA  = options.aboveEMA50 !== undefined ? options.aboveEMA50 : true;
@@ -138,8 +138,12 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   let entryReady = false;
   let entryDir = 'long';
 
+  // Block extreme RSI trap เมื่อ Conf สูงมาก
+  const extremeRSI = conf >= 90 && (rsi < 35 || rsi > 65);
   if (!confOK) {
     sig = `HOLD — Conf ต่ำ (${conf}%)`;
+  } else if (extremeRSI) {
+    sig = `HOLD — RSI Extreme (${rsi.toFixed(0)}) Trap Risk`;
   } else if (trap.alert) {
     sig = 'NO GO — TRAP DETECTED';
   } else if (!atrOK) {
