@@ -1,9 +1,9 @@
-// ETH Cone Bot v3.19
+// ETH Cone Bot v3.20
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.19'; // ← แก้ที่นี่ที่เดียว
-const DASH_VERSION = 'v5.28';
+const BOT_VERSION = 'v3.20'; // ← แก้ที่นี่ที่เดียว
+const DASH_VERSION = 'v5.29';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
@@ -160,6 +160,24 @@ async function pollTelegram() {
 
 // Poll ทุก 3 วินาที
 setInterval(pollTelegram, 3000);
+
+// ── Auto sync logic.js จาก GitHub ──────────────
+let lastLogicHash = '';
+async function checkLogicUpdate() {
+  try {
+    const r = await fetch(LOGIC_URL);
+    const code = await r.text();
+    const hash = code.length + '-' + code.slice(0,50);
+    if (lastLogicHash && hash !== lastLogicHash) {
+      console.log('🔄 logic.js เปลี่ยน → reload...');
+      await loadLogic();
+      console.log('✅ logic.js reloaded');
+    }
+    lastLogicHash = hash;
+  } catch {}
+}
+setInterval(checkLogicUpdate, 60000); // ทุก 1 นาที
+checkLogicUpdate(); // check ตอน start
 
 // ── Fetch ─────────────────────────────────
 async function fetchKlines(sym, iv, lim) { const r = await fetch(`${BINANCE}/fapi/v1/klines?symbol=${sym}&interval=${iv}&limit=${lim}`); return r.json(); }
@@ -495,7 +513,7 @@ const server=http.createServer((req,res)=>{
       const c=JSON.parse(body);
       if(c.action==='stop'){autoTradeActive=false;lastConfAlert=false;}
       else if(c.action==='reset'){autoTrades=[];autoTradeActive=false;lastConfAlert=false;lastTradeEndTime=0;try{require('fs').unlinkSync('/home/ubuntu/eth-bot/auto_trades.json');}catch{}}
-      else if(c.action==='start'){if(c.reset){autoTrades=[];try{require('fs').unlinkSync('/home/ubuntu/eth-bot/auto_trades.json');}catch{}}if(c.target)AUTO_TRADE_TARGET_DYNAMIC=parseInt(c.target);autoTradeEnabled=true;autoTradeActive=false;lastConfAlert=false;lastTradeEndTime=0;}
+      else if(c.action==='start'){if(c.reset){autoTrades=[];try{require('fs').unlinkSync('/home/ubuntu/eth-bot/auto_trades.json');}catch{}}if(c.target)AUTO_TRADE_TARGET_DYNAMIC=parseInt(c.target);autoTradeEnabled=true;autoTradeActive=false;lastConfAlert=false;lastTradeEndTime=0;try{fs.writeFileSync("/home/ubuntu/eth-bot/.bot_state.json",JSON.stringify({enabled:true,target:AUTO_TRADE_TARGET_DYNAMIC}));}catch{}}
       res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
       res.end(JSON.stringify({ok:true,msg:'done'}));
     }catch(e){res.writeHead(400);res.end(JSON.stringify({ok:false}));}
@@ -514,6 +532,7 @@ console.log('📡 Monitoring every 10s | Singapore 🇸🇬');
 
   // Load existing auto trades
   try{const d=fs.readFileSync('/home/ubuntu/eth-bot/auto_trades.json','utf8');autoTrades=JSON.parse(d);console.log(`♻️ Loaded ${autoTrades.length} auto trades`);}catch{}
+try{const s=JSON.parse(fs.readFileSync('/home/ubuntu/eth-bot/.bot_state.json','utf8'));if(s.enabled){autoTradeEnabled=true;AUTO_TRADE_TARGET_DYNAMIC=s.target||10;console.log('♻️ Auto trade restored: target='+AUTO_TRADE_TARGET_DYNAMIC);};}catch{}
 
   const savedTrade=loadTradeFile();
   if(savedTrade){tradeState=savedTrade;startTradeMonitor(savedTrade);}
