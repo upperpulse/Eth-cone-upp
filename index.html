@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.28 — nattajoe</title>
+<title>ETH Cone v5.29 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -224,13 +224,41 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   50% { box-shadow: 0 0 15px var(--cyan), 0 0 25px var(--cyan); opacity:0.8; }
 }
 </style>
+
+  <!-- Import logic.js from GitHub — Single Source of Truth -->
+  <script>
+  const LOGIC_RAW_URL = 'https://raw.githubusercontent.com/upperpulse/Eth-cone-upp/main/logic.js';
+  let ETH_LOGIC_LOADED = false;
+
+  async function loadETHLogic() {
+    try {
+      const r = await fetch(LOGIC_RAW_URL + '?t=' + Date.now());
+      const code = await r.text();
+      // Execute in browser context
+      const fn = new Function(code + '\nreturn typeof ETH_LOGIC !== "undefined" ? ETH_LOGIC : window.ETH_LOGIC;');
+      const logicObj = fn();
+      if (logicObj) {
+        window.ETH_LOGIC = logicObj;
+        ETH_LOGIC_LOADED = true;
+        console.log('✅ logic.js loaded v' + logicObj.version);
+      }
+    } catch(e) {
+      console.warn('⚠️ logic.js load failed, using built-in:', e.message);
+    }
+  }
+
+  // Load on startup
+  loadETHLogic();
+  // Auto reload ทุก 1 นาที — sync กับ GitHub
+  setInterval(loadETHLogic, 60000);
+  </script>
 </head>
 <body>
 <div class="wrap">
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.28</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.29</span></div>
     <div class="brand-sub">OBV15 · RSI30 · NORM.CONF · BTC · F&G·6H · BACKTEST L+S · CSV · nattajoe</div>
   </div>
   <div class="hdr-right">
@@ -828,7 +856,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.28 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.29 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -858,7 +886,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 <script src="logic.js"></script>
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.28 — nattajoe
+// ETH CONE ULTIMATE v5.29 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
@@ -1149,7 +1177,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.28 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.29 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1327,7 +1355,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.28
+// BASELINE ENGINE v5.29
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1447,7 +1475,7 @@ async function runEngine(kd){
   // เก็บ base values สำหรับ Live Adjustment
   liveBaseLC=lConf;liveBaseSC=sConf;liveRSI=rsi;
 
-  // Smart Entry Delay — v5.28
+  // Smart Entry Delay — v5.29
   // ลำดับ: Conf ≥ 75% ก่อน → แล้วค่อยตรวจ Trigger
   const macdReady=macd1h.cross||macd1h.positive;
   const macdCross=macd1h.cross;
@@ -1455,7 +1483,9 @@ async function runEngine(kd){
   const btcAligned=btcBullish;
   const rsiOK=!rsiOverbought&&!rsiOversold||(rsiOversold&&lConf>sConf)||(rsiOverbought&&sConf>lConf);
   const topConfNow=Math.max(lConf,sConf);
-  const confOK=topConfNow>=75; // Gate 1: ต้องผ่านก่อนเสมอ
+  // ใช้ logic.js threshold ถ้าโหลดได้
+  const confThreshold = (window.ETH_LOGIC && window.ETH_LOGIC.CONF_THRESHOLD) ? window.ETH_LOGIC.CONF_THRESHOLD : 80;
+  const confOK=topConfNow>=confThreshold; // Gate 1: sync กับ logic.js
 
   // นับ trigger score (ใช้แสดงผล)
   const fgVal=parseInt(C._fgVal||50);
@@ -1464,9 +1494,13 @@ async function runEngine(kd){
   const confMin=75; // fixed
 
   let entrySig='HOLD';
+  // Block extreme RSI trap — sync กับ logic.js
+  const extremeRSI = topConfNow >= 90 && (rsi < 35 || rsi > 65);
   if(!confOK){
     // Conf ต่ำ → ไม่ตรวจ Trigger เลย
-    entrySig='HOLD — Conf ต่ำ ('+topConfNow+'% / ต้อง 75%)';
+    entrySig='HOLD — Conf ต่ำ ('+topConfNow+'% / ต้อง 80%)';
+  } else if(extremeRSI){
+    entrySig='HOLD — RSI Extreme ('+rsi.toFixed(0)+') Trap Risk';
   } else if(trapAlert){
     entrySig='NO GO — TRAP DETECTED';
   } else if(macdCross&&obvReady&&btcAligned&&rsiOK){
@@ -1721,7 +1755,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.28 Ready',p:100}];
+    {t:'✅ Baseline v5.29 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   // ตรวจว่าเปิดจาก local file
   const isLocal=location.protocol==='file:'||location.protocol==='content:';
@@ -1760,8 +1794,8 @@ async function reanalyze(){
   try{
     await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
     await update();
-    addLog(`🔄 v5.28 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-    sendNotif('ETH Cone v5.28 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
+    addLog(`🔄 v5.29 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+    sendNotif('ETH Cone v5.29 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
     // บันทึก session ล่าสุด
     saveAnalysisSession();
   }catch(e){
@@ -2305,7 +2339,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.28 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.28',curPrice||2311,'Baseline v5.28 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.29 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.29',curPrice||2311,'Baseline v5.29 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export

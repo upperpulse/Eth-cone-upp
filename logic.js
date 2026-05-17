@@ -5,6 +5,7 @@
 // ============================================================
 
 const ETH_LOGIC_VERSION = '2.0';
+const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
 function calcEMA(c, n) {
@@ -273,6 +274,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
 // ── Export — รองรับทั้ง Node.js และ Browser ────────────────
 const ETH_LOGIC = {
   version: ETH_LOGIC_VERSION,
+  CONF_THRESHOLD,
   calcEMA,
   calcMACD,
   calcRSI,
