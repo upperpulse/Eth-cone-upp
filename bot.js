@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.20
+// ETH Cone Bot v3.21
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.20'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.21'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.29';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -176,7 +176,7 @@ async function checkLogicUpdate() {
     lastLogicHash = hash;
   } catch {}
 }
-setInterval(checkLogicUpdate, 60000); // ทุก 1 นาที
+setInterval(checkLogicUpdate, 300000); // ทุก 5 นาที
 checkLogicUpdate(); // check ตอน start
 
 // ── Fetch ─────────────────────────────────
