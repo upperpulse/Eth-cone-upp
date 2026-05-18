@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.0';
+const ETH_LOGIC_VERSION = '2.1';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -134,6 +134,7 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   const aboveEMA  = options.aboveEMA50 !== undefined ? options.aboveEMA50 : true;
   const belowEMA  = options.belowEMA50 !== undefined ? options.belowEMA50 : true;
   const atrOK     = options.atrOK !== undefined ? options.atrOK : true;
+  const momentumOK = options.momentumOK !== undefined ? options.momentumOK : true; // micro-momentum confirm
 
   let sig = 'HOLD';
   let entryReady = false;
@@ -149,6 +150,8 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
     sig = 'NO GO — TRAP DETECTED';
   } else if (!atrOK) {
     sig = 'HOLD — ATR ต่ำเกิน (Sideways)';
+  } else if (!momentumOK) {
+    sig = 'HOLD — รอจังหวะ (Counter-Momentum)';
 
   // ── LONG conditions ──────────────────────
   } else if (macd1h.positive && (obv.positive || obv.slope > 0) && !rsiOB && rsi > 28 && aboveEMA) {
@@ -237,6 +240,21 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
   const avgATR   = calcATR(ethKlines, 20);
   const atrOK    = atr > avgATR * 0.8 && atr < avgATR * 1.8; // ATR ต้องอยู่ใน active range ไม่ volatile เกิน
 
+  // ── Momentum Confirmation — ไม่เข้าสวน micro-momentum ──
+  // ดู 3 candle ล่าสุด + RSI slope
+  const c1 = ec[ec.length-1], c2 = ec[ec.length-2], c3 = ec[ec.length-3];
+  const rsiPrev  = calcRSI(ec.slice(0, -1), 14);
+  const rsiSlope = rsi - rsiPrev; // RSI กำลังขึ้นหรือลง
+  // candle เขียว = ขึ้น, แดง = ลง
+  const greenCount = [c1>c2, c2>c3].filter(Boolean).length;
+  const redCount   = [c1<c2, c2<c3].filter(Boolean).length;
+  // Block เฉพาะตอนสวน momentum แรงจริงๆ:
+  // SHORT จะ block ก็ต่อเมื่อ ราคาขึ้น 2 candle ติด AND RSI พุ่ง > 4
+  const strongUp   = greenCount === 2 && rsiSlope > 4;
+  const strongDown = redCount === 2 && rsiSlope < -4;
+  const momentumLong  = !strongDown; // LONG: ไม่เข้าตอนราคาดิ่งแรง
+  const momentumShort = !strongUp;   // SHORT: ไม่เข้าตอนราคาพุ่งแรง
+
   // คำนวณ Conf ทั้งสองฝั่ง
   const confLong  = calcConfidence(macd, rsi, obv, btcMacd, funding, trap);
   
@@ -245,10 +263,10 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
   const obvShort  = { ...obv,  positive: false, slope: -Math.abs(obv.slope) };
   const confShort = calcConfidence(macdShort, rsi, obvShort, btcMacd, funding, trap);
 
-  // Signal ทั้งสองฝั่ง พร้อม EMA และ ATR filter
+  // Signal ทั้งสองฝั่ง พร้อม EMA, ATR และ Momentum filter
   const opts = { aboveEMA50: aboveEMA50, belowEMA50: belowEMA50, atrOK };
-  const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts});
-  const sigShort = calcSignal(macdShort, obvShort, rsi, trap, confShort, {...opts});
+  const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong});
+  const sigShort = calcSignal(macdShort, obvShort, rsi, trap, confShort, {...opts, momentumOK: momentumShort});
 
   // เลือก direction ที่ดีกว่า
   let best = null;
@@ -264,6 +282,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
   return {
     macd, obv, rsi, atr, trap, btcMacd,
     ema50, ema20, price, aboveEMA50, belowEMA50, atrOK,
+    rsiSlope, momentumLong, momentumShort,
     confLong, confShort,
     sigLong, sigShort,
     best,

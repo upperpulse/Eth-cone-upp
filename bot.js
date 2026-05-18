@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.21
+// ETH Cone Bot v3.23
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.21'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.23'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.29';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -56,8 +56,9 @@ let dailyPnL            = 0;    // PnL รวมวันนี้
 const ATR_MULT_TP1      = 1.5;  // TP1 = entry ± ATR*1.5
 const ATR_MULT_TP2      = 3.0;  // TP2 = entry ± ATR*3.0
 const ATR_MULT_SL       = 0.75; // SL  = entry ∓ ATR*0.75
-const TRAIL_BREAKEVEN   = 0.5;   // ขยับ SL → breakeven เมื่อ maxP > TP1×50%
-const TRAIL_LOCK        = 1.0;   // ขยับ SL → TP1×50% เมื่อ maxP > TP1×100%
+const TRAIL_BREAKEVEN   = 0.3;   // ขยับ SL → breakeven เมื่อ maxP > TP1×30%
+const TRAIL_LOCK        = 0.6;   // ขยับ SL → TP1×40% เมื่อ maxP > TP1×60%
+const PARTIAL_TP_RATIO  = 0.5;   // ปิด 50% เมื่อถึง TP1
 const TRADE_COOLDOWN_MS = 1800000; // 30 นาที cooldown หลัง trade จบ
 
 // ── State ─────────────────────────────────
@@ -229,6 +230,8 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
   // Monitor loop
   let tp1Hit = false;
   let maxP = 0, maxL = 0;
+  let partialClosed = false;
+  let realizedPnl = 0;  // กำไรที่ปิดไปแล้วบางส่วน
 
   const monitor = setInterval(async () => {
     const now = Date.now();
@@ -249,7 +252,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
       if (dir === 'short' && sl > entry) { sl = entry; }
     }
     if (maxP >= tp1pnl * TRAIL_LOCK) {
-      const lockPrice = dir === 'long' ? entry + tp1dist * 0.5 : entry - tp1dist * 0.5;
+      const lockPrice = dir === 'long' ? entry + tp1dist * 0.4 : entry - tp1dist * 0.4;
       if (dir === 'long'  && sl < lockPrice) { sl = lockPrice; }
       if (dir === 'short' && sl > lockPrice) { sl = lockPrice; }
     }
@@ -260,8 +263,10 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
       autoTradeActive = false;
       lastTradeEndTime = Date.now(); // เริ่ม cooldown 30 นาที
       lastConfAlert = false;
-      const pnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
-      const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TIMEOUT', maxP, maxL, conf };
+      const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
+      const livePnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
+      const pnl = realizedPnl + livePnl * remainRatio;
+      const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'TIMEOUT', maxP, maxL, conf, partialClosed };
       autoTrades.push(result);
       saveAutoTrades();
       await tg(`⏰ <b>Auto Trade #${tradeNum} TIMEOUT</b>\n\n${dir.toUpperCase()} Entry: $${f(entry)} → $${f(p)}\nPnL: ${pnl>=0?'+':''}$${pnl.toFixed(2)}\nMax Profit: +$${maxP.toFixed(2)} | Max Loss: $${maxL.toFixed(2)}`, true);
@@ -270,35 +275,52 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
     }
 
     if (dir === 'long') {
-      if (!tp1Hit && p >= tp1) { tp1Hit = true; await tg(`🎯 Auto #${tradeNum} TP1 HIT $${f(p)}`, true); }
+      if (!tp1Hit && p >= tp1) {
+        tp1Hit = true;
+        // Partial TP — ปิด 50% ล็อกกำไร
+        const partialPnl = (p - entry) * qty * PARTIAL_TP_RATIO;
+        realizedPnl += partialPnl;
+        partialClosed = true;
+        await tg(`🎯 <b>Auto #${tradeNum} TP1 HIT</b> $${f(p)}\n💰 ปิด 50% → +$${partialPnl.toFixed(2)}\nที่เหลือ 50% รอ TP2`, true);
+      }
       if (p >= tp2) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
-        const pnl = (p - entry) * qty;
-        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf };
+        const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
+        const pnl = realizedPnl + (p - entry) * qty * remainRatio;
+        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf, partialClosed };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nLONG $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p <= sl) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
-        const pnl = (p - entry) * qty;
-        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'SL', maxP, maxL, conf };
+        const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
+        const pnl = realizedPnl + (p - entry) * qty * remainRatio;
+        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'SL', maxP, maxL, conf, partialClosed };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nLONG $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       }
     } else {
-      if (!tp1Hit && p <= tp1) { tp1Hit = true; await tg(`🎯 Auto #${tradeNum} TP1 HIT $${f(p)}`, true); }
+      if (!tp1Hit && p <= tp1) {
+        tp1Hit = true;
+        const partialPnl = (entry - p) * qty * PARTIAL_TP_RATIO;
+        realizedPnl += partialPnl;
+        partialClosed = true;
+        await tg(`🎯 <b>Auto #${tradeNum} TP1 HIT</b> $${f(p)}\n💰 ปิด 50% → +$${partialPnl.toFixed(2)}\nที่เหลือ 50% รอ TP2`, true);
+      }
       if (p <= tp2) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
-        const pnl = (entry - p) * qty;
-        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf };
+        const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
+        const pnl = realizedPnl + (entry - p) * qty * remainRatio;
+        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf, partialClosed };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nSHORT $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p >= sl) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
-        const pnl = (entry - p) * qty;
-        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'SL', maxP, maxL, conf };
+        const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
+        const pnl = realizedPnl + (entry - p) * qty * remainRatio;
+        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'SL', maxP, maxL, conf, partialClosed };
         autoTrades.push(result); saveAutoTrades();
         await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nSHORT $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
