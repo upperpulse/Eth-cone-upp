@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.29 — nattajoe</title>
+<title>ETH Cone v5.30 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -258,7 +258,13 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.29</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.30</span></div>
+  <div id="modeSwitch" style="display:flex;gap:6px;align-items:center;justify-content:center;margin:6px 0;font-size:9px;">
+    <span style="color:var(--muted);">MODE:</span>
+    <button id="modePaper" class="cbtn cy on" onclick="setTradeMode('paper')" style="font-size:9px;padding:4px 12px;">🧪 PAPER</button>
+    <button id="modeLive" class="cbtn rd" onclick="setTradeMode('live')" style="font-size:9px;padding:4px 12px;">🔴 LIVE</button>
+    <span id="modeStatus" style="color:var(--cyan);font-family:'Share Tech Mono',monospace;"></span>
+  </div>
     <div class="brand-sub">OBV15 · RSI30 · NORM.CONF · BTC · F&G·6H · BACKTEST L+S · CSV · nattajoe</div>
   </div>
   <div class="hdr-right">
@@ -294,6 +300,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   <div class="tab" onclick="sw('multitf')">📈 MULTI-TF</div>
   <div class="tab" onclick="sw('history')">📋 HISTORY</div>
   <div class="tab" onclick="sw('analytics')">📊 ANALYTICS</div>
+  <div class="tab" onclick="sw('live')" id="tab-btn-live" style="display:none;">🔴 LIVE</div>
 </div>
 
 <!-- MAIN -->
@@ -551,6 +558,28 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
   <div id="globalSLStatus" style="margin-top:8px;font-size:9px;font-family:'Share Tech Mono',monospace;color:var(--muted);text-align:center;">
     Global SL: OFF
+  </div>
+</div>
+
+<!-- RISK DASHBOARD -->
+<div class="card" style="border-color:rgba(168,85,247,.4);margin-bottom:10px;">
+  <div class="ctitle" style="color:var(--purple);">📊 RISK DASHBOARD</div>
+  <div class="angrid">
+    <div class="anbox"><div class="anlbl">DAILY PnL</div><div class="anval" id="riskDailyPnl">—</div></div>
+    <div class="anbox"><div class="anlbl">STREAK</div><div class="anval" id="riskStreak">—</div></div>
+    <div class="anbox"><div class="anlbl">MAX DD</div><div class="anval" id="riskDrawdown">—</div></div>
+    <div class="anbox"><div class="anlbl">KELLY %</div><div class="anval" id="riskKelly">—</div></div>
+  </div>
+</div>
+
+<!-- SIGNAL QUALITY MONITOR -->
+<div class="card" style="border-color:rgba(34,211,238,.4);margin-bottom:10px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <div class="ctitle" style="color:var(--cyan);">🎯 SIGNAL QUALITY</div>
+    <button class="cbtn cy" onclick="fetchSignalQuality()" style="font-size:8px;padding:4px 8px;">🔄</button>
+  </div>
+  <div id="sigQuality" style="font-size:10px;font-family:'Share Tech Mono',monospace;color:var(--muted);">
+    กำลังโหลด...
   </div>
 </div>
 
@@ -856,7 +885,50 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.29 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+
+<!-- LIVE TRADING TAB -->
+<div class="tab-content" id="tab-live" style="display:none;">
+  <div class="card" style="border-color:rgba(239,68,68,.5);margin-bottom:10px;">
+    <div class="ctitle" style="color:var(--red);">🔴 LIVE TRADING — BINANCE FUTURES</div>
+    <div id="liveWarn" style="font-size:9px;color:var(--yellow);background:rgba(234,179,8,.1);padding:8px;border-radius:4px;margin:6px 0;">
+      ⚠️ โหมด LIVE ใช้เงินจริง — ตรวจสอบทุกอย่างก่อนเริ่ม
+    </div>
+  </div>
+
+  <!-- Balance & Position -->
+  <div class="card" style="margin-bottom:10px;">
+    <div class="ctitle">💰 ACCOUNT</div>
+    <div class="angrid">
+      <div class="anbox"><div class="anlbl">BALANCE</div><div class="anval" id="liveBalance">—</div></div>
+      <div class="anbox"><div class="anlbl">AVAILABLE</div><div class="anval" id="liveAvail">—</div></div>
+      <div class="anbox"><div class="anlbl">UNREAL PnL</div><div class="anval" id="liveUPnl">—</div></div>
+    </div>
+  </div>
+
+  <!-- Open Position -->
+  <div class="card" style="margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div class="ctitle">📊 OPEN POSITION</div>
+      <button class="cbtn cy" onclick="fetchLivePosition()" style="font-size:8px;padding:4px 8px;">🔄</button>
+    </div>
+    <div id="livePosition" style="font-size:10px;font-family:'Share Tech Mono',monospace;color:var(--muted);">
+      ไม่มี position เปิดอยู่
+    </div>
+    <button class="cbtn rd" onclick="emergencyClose()" style="width:100%;padding:10px;font-size:11px;letter-spacing:2px;margin-top:8px;">
+      🚨 EMERGENCY CLOSE ALL
+    </button>
+  </div>
+
+  <!-- Pending Orders -->
+  <div class="card" style="margin-bottom:10px;">
+    <div class="ctitle">📋 PENDING ORDERS</div>
+    <div id="livePendingOrders" style="font-size:9px;font-family:'Share Tech Mono',monospace;color:var(--muted);">
+      —
+    </div>
+  </div>
+</div>
+
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.30 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -886,7 +958,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 <script src="logic.js"></script>
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.29 — nattajoe
+// ETH CONE ULTIMATE v5.30 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
@@ -1177,7 +1249,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.29 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.30 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1195,14 +1267,19 @@ function setTV(id,val,color='var(--text)'){const e=el(id);if(e){e.textContent=va
 
 // Tabs
 function sw(t){
-  const ids=['main','trigger','alerts','trade','multitf','history','analytics'];
-  document.querySelectorAll('.tab').forEach((e,i)=>e.classList.toggle('active',ids[i]===t));
-  document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
-  el('tab-'+t).classList.add('active');
+  const ids=['main','trigger','alerts','trade','multitf','history','analytics','live'];
+  document.querySelectorAll('.tab').forEach((e)=>{
+    const tabFor = e.getAttribute('onclick');
+    if(tabFor) e.classList.toggle('active', tabFor.includes("'"+t+"'"));
+  });
+  document.querySelectorAll('.tab-content').forEach(e=>{e.classList.remove('active');e.style.display='none';});
+  const tc = el('tab-'+t);
+  if(tc){ tc.classList.add('active'); tc.style.display='block'; }
   if(t==='history')renderHistory();
   if(t==='analytics')renderAnalytics();
   if(t==='multitf')fetchAllTF();
-  if(t==='trade')calcHoldSuggest();
+  if(t==='trade'){calcHoldSuggest();updateRiskDashboard();fetchSignalQuality();}
+  if(t==='live'){fetchLivePosition();}
 }
 
 // Log
@@ -1355,7 +1432,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.29
+// BASELINE ENGINE v5.30
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1475,7 +1552,7 @@ async function runEngine(kd){
   // เก็บ base values สำหรับ Live Adjustment
   liveBaseLC=lConf;liveBaseSC=sConf;liveRSI=rsi;
 
-  // Smart Entry Delay — v5.29
+  // Smart Entry Delay — v5.30
   // ลำดับ: Conf ≥ 75% ก่อน → แล้วค่อยตรวจ Trigger
   const macdReady=macd1h.cross||macd1h.positive;
   const macdCross=macd1h.cross;
@@ -1755,7 +1832,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.29 Ready',p:100}];
+    {t:'✅ Baseline v5.30 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   // ตรวจว่าเปิดจาก local file
   const isLocal=location.protocol==='file:'||location.protocol==='content:';
@@ -1794,8 +1871,8 @@ async function reanalyze(){
   try{
     await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
     await update();
-    addLog(`🔄 v5.29 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-    sendNotif('ETH Cone v5.29 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
+    addLog(`🔄 v5.30 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+    sendNotif('ETH Cone v5.30 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
     // บันทึก session ล่าสุด
     saveAnalysisSession();
   }catch(e){
@@ -2339,7 +2416,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.29 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.29',curPrice||2311,'Baseline v5.29 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.30 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.30',curPrice||2311,'Baseline v5.30 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export
@@ -2867,6 +2944,143 @@ async function resetBotAutoTrade() {
 // Load archive summary on start
 document.addEventListener('DOMContentLoaded', () => setTimeout(updateArchiveSummary, 500));
 setInterval(updateArchiveSummary, 60000);
+
+
+// ══════════════════════════════════════════
+// PHASE 3 — LIVE MODE + RISK + SIGNAL QUALITY
+// ══════════════════════════════════════════
+let tradeMode = 'paper';
+
+function setTradeMode(mode) {
+  if (mode === 'live') {
+    if (!confirm('⚠️ เปลี่ยนเป็น LIVE MODE — ใช้เงินจริง!\n\nยืนยันครั้งที่ 1/2')) return;
+    if (!confirm('🔴 ยืนยันอีกครั้ง — แน่ใจว่าจะเทรดด้วยเงินจริง?\n\nยืนยันครั้งที่ 2/2')) return;
+  }
+  tradeMode = mode;
+  document.getElementById('modePaper').classList.toggle('on', mode==='paper');
+  document.getElementById('modeLive').classList.toggle('on', mode==='live');
+  document.getElementById('tab-btn-live').style.display = mode==='live' ? 'block' : 'none';
+  const st = document.getElementById('modeStatus');
+  if (st) st.textContent = mode==='live' ? '🔴 LIVE — เงินจริง' : '🧪 PAPER';
+  if (st) st.style.color = mode==='live' ? 'var(--red)' : 'var(--cyan)';
+}
+
+// ── Risk Dashboard ──
+async function updateRiskDashboard() {
+  try {
+    let trades = [];
+    if (VM_URL) {
+      const r = await fetch(VM_URL + '/auto-archive', { headers: {'ngrok-skip-browser-warning':'true'} });
+      const d = await r.json();
+      if (Array.isArray(d)) trades = d;
+    }
+    if (trades.length === 0) return;
+
+    // Daily PnL — เฉพาะวันนี้
+    const today = new Date().setHours(0,0,0,0);
+    const todayTrades = trades.filter(t => (t.ts||0) >= today);
+    const dailyPnl = todayTrades.reduce((a,t)=>a+(t.pnl||0),0);
+
+    // Streak
+    let streak = 0, streakType = '';
+    for (let i=trades.length-1; i>=0; i--) {
+      const win = trades[i].result==='TP1'||trades[i].result==='TP2'||(trades[i].result==='TIMEOUT'&&trades[i].pnl>0);
+      if (i===trades.length-1) { streakType = win?'W':'L'; streak=1; }
+      else {
+        const w = win?'W':'L';
+        if (w===streakType) streak++;
+        else break;
+      }
+    }
+
+    // Max Drawdown
+    let peak=0, cumPnl=0, maxDD=0;
+    trades.forEach(t=>{ cumPnl+=t.pnl||0; if(cumPnl>peak)peak=cumPnl; const dd=peak-cumPnl; if(dd>maxDD)maxDD=dd; });
+
+    // Kelly
+    const wins = trades.filter(t=>t.result==='TP1'||t.result==='TP2'||(t.result==='TIMEOUT'&&t.pnl>0));
+    const losses = trades.filter(t=>!(t.result==='TP1'||t.result==='TP2'||(t.result==='TIMEOUT'&&t.pnl>0)));
+    const W = wins.length/trades.length;
+    const avgW = wins.length?wins.reduce((a,t)=>a+t.pnl,0)/wins.length:0;
+    const avgL = losses.length?Math.abs(losses.reduce((a,t)=>a+t.pnl,0)/losses.length):1;
+    const R = avgL>0?avgW/avgL:0;
+    const kelly = R>0?(W-(1-W)/R)*100:0;
+
+    const set=(id,v,c)=>{const e=document.getElementById(id);if(e){e.textContent=v;if(c)e.style.color=c;}};
+    set('riskDailyPnl', (dailyPnl>=0?'+':'')+'$'+dailyPnl.toFixed(2), dailyPnl>=0?'var(--green)':'var(--red)');
+    set('riskStreak', streak+streakType, streakType==='W'?'var(--green)':'var(--red)');
+    set('riskDrawdown', '$'+maxDD.toFixed(2), 'var(--red)');
+    set('riskKelly', (kelly>=0?'+':'')+kelly.toFixed(0)+'%', kelly>=0?'var(--green)':'var(--red)');
+  } catch(e) {}
+}
+
+// ── Signal Quality Monitor ──
+async function fetchSignalQuality() {
+  const el = document.getElementById('sigQuality');
+  if (!el || !VM_URL) return;
+  try {
+    const r = await fetch(VM_URL + '/health', { headers: {'ngrok-skip-browser-warning':'true'} });
+    const d = await r.json();
+    const sig = d.sig || '';
+    let html = '';
+    // parse signal
+    if (sig.includes('Conf ต่ำ')) {
+      const m = sig.match(/(\d+)%/);
+      const conf = m ? parseInt(m[1]) : 0;
+      const gap = 80 - conf;
+      html = '⏳ Conf '+conf+'% — อีก '+gap+'% ถึงเกณฑ์ (80%)';
+    } else if (sig.includes('ATR')) {
+      html = '🔸 ATR ต่ำ — ตลาด sideways รอ momentum';
+    } else if (sig.includes('Counter-Momentum')) {
+      html = '🔸 รอจังหวะ — ราคากำลังสวนทิศ';
+    } else if (sig.includes('RSI Extreme')) {
+      html = '🔸 RSI extreme — เลี่ยง trap';
+    } else if (sig.includes('GO')) {
+      html = '✅ Signal พร้อม — '+sig;
+    } else {
+      html = sig;
+    }
+    el.innerHTML = html + '<br><span style="color:var(--muted);font-size:8px;">Mode: '+(d.tradeMode||'paper')+' | '+(d.autoEnabled?'🟢 Enabled':'⚪ Disabled')+'</span>';
+  } catch(e) { el.textContent = 'เชื่อมต่อ VM ไม่ได้'; }
+}
+
+// ── Live Position (Binance) ──
+async function fetchLivePosition() {
+  const el = document.getElementById('livePosition');
+  if (!el) return;
+  if (tradeMode !== 'live') { el.textContent = 'อยู่ในโหมด PAPER'; return; }
+  if (!VM_URL) { el.textContent = 'ไม่มี VM URL'; return; }
+  try {
+    const r = await fetch(VM_URL + '/live-position', { headers: {'ngrok-skip-browser-warning':'true'} });
+    const d = await r.json();
+    if (d.position) {
+      el.innerHTML = d.position.symbol+' '+d.position.side+' '+d.position.qty+
+        '<br>Entry: $'+d.position.entry+' | PnL: '+d.position.pnl;
+    } else {
+      el.textContent = 'ไม่มี position เปิดอยู่';
+    }
+  } catch(e) { el.textContent = 'ดึงข้อมูลไม่ได้ (endpoint ยังไม่พร้อม)'; }
+}
+
+async function emergencyClose() {
+  if (tradeMode !== 'live') { alert('อยู่ในโหมด PAPER'); return; }
+  if (!confirm('🚨 ปิด position ทั้งหมดทันที?')) return;
+  try {
+    await fetch(VM_URL + '/live-close-all', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','ngrok-skip-browser-warning':'true'}
+    });
+    alert('ส่งคำสั่งปิด position แล้ว');
+    fetchLivePosition();
+  } catch(e) { alert('ส่งคำสั่งไม่สำเร็จ'); }
+}
+
+// Auto-refresh
+setInterval(() => {
+  updateRiskDashboard();
+  fetchSignalQuality();
+}, 30000);
+setTimeout(() => { updateRiskDashboard(); fetchSignalQuality(); }, 2000);
 
 </script>
 </body>
