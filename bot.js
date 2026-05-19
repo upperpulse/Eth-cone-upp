@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.23
+// ETH Cone Bot v3.24
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.23'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.24'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.29';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -50,6 +50,23 @@ let AUTO_TRADE_TARGET_DYNAMIC = 10;
 let autoTradeEnabled = false; // ปรับได้จาก Dashboard
 const AUTO_DURATION_MS  = 7200000; // 2H
 const AUTO_SIZE         = 100;  // $100
+
+// ── Trade Mode Config ──────────────────────────
+const TRADE_MODE = 'paper';  // 'paper' = จำลอง | 'live' = เทรดจริง Binance
+// Binance API config (ใช้ตอน TRADE_MODE='live' — ยังไม่เปิดใช้)
+const BINANCE_CONFIG = {
+  apiKey:    process.env.BINANCE_API_KEY    || '',
+  apiSecret: process.env.BINANCE_API_SECRET || '',
+  baseURL:   'https://fapi.binance.com',
+  symbol:    'ETHUSDT',
+  testnet:   false
+};
+const LEVERAGE = 3;          // เลเวอเรจ (global)
+
+// Micro-Momentum — เก็บราคา tick ล่าสุดเช็คก่อนเข้า
+let tickHistory = [];        // {price, ts} 12 ตัวล่าสุด (~2 นาที)
+const MICRO_LOOKBACK = 6;    // เช็ค 6 ticks (60 วินาที)
+const MICRO_THRESHOLD = 0.0012; // 0.12% — ถ้าราคาวิ่งสวนเกินนี้ → รอ
 let GLOBAL_SL_AMOUNT    = 0;    // Paper Global SL ($) — 0 = ปิด
 let globalSLActive      = false;
 let dailyPnL            = 0;    // PnL รวมวันนี้
@@ -191,12 +208,75 @@ async function fetchFG() {
 
 
 // ── Auto Paper Trade ──────────────────────
-async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
+// ══════════════════════════════════════════════
+// BINANCE API LAYER — เตรียมพร้อม (active เมื่อ TRADE_MODE='live')
+// ══════════════════════════════════════════════
+const crypto = require('crypto');
+
+// สร้าง signature สำหรับ Binance API
+function signRequest(queryString) {
+  return crypto.createHmac('sha256', BINANCE_CONFIG.apiSecret)
+    .update(queryString).digest('hex');
+}
+
+// สร้าง order object — map กับ Binance Futures API
+function buildOrder(params) {
+  const { side, type, quantity, price, stopPrice, callbackRate, reduceOnly } = params;
+  const order = {
+    symbol: BINANCE_CONFIG.symbol,
+    side,                          // 'BUY' | 'SELL'
+    type,                          // 'MARKET' | 'STOP_MARKET' | 'TAKE_PROFIT_MARKET' | 'TRAILING_STOP_MARKET'
+    quantity: quantity.toFixed(3)
+  };
+  if (price)        order.price = price.toFixed(2);
+  if (stopPrice)    order.stopPrice = stopPrice.toFixed(2);
+  if (callbackRate) order.callbackRate = callbackRate.toFixed(1);  // Trailing Stop %
+  if (reduceOnly)   order.reduceOnly = 'true';
+  return order;
+}
+
+// แปลง ATR → Trailing callback rate %
+function atrToCallbackRate(atr, entry) {
+  // callback rate = (ATR × 0.75 / entry) × 100, จำกัด 0.1-5%
+  const rate = (atr * ATR_MULT_SL / entry) * 100;
+  return Math.max(0.1, Math.min(5.0, rate));
+}
+
+// ส่ง order ไป Binance (active เมื่อ live เท่านั้น)
+async function placeBinanceOrder(order) {
+  if (TRADE_MODE !== 'live') {
+    console.log('[PAPER] buildOrder:', JSON.stringify(order));
+    return { paper: true, order };
+  }
+  // --- LIVE MODE (ยังไม่เปิดใช้ ต้องมี API key) ---
+  const ts = Date.now();
+  const qs = Object.entries({...order, timestamp: ts})
+    .map(([k,v]) => `${k}=${v}`).join('&');
+  const sig = signRequest(qs);
+  const r = await fetch(`${BINANCE_CONFIG.baseURL}/fapi/v1/order?${qs}&signature=${sig}`, {
+    method: 'POST',
+    headers: { 'X-MBX-APIKEY': BINANCE_CONFIG.apiKey }
+  });
+  return await r.json();
+}
+
+// ดึง balance (live เท่านั้น)
+async function getBinanceBalance() {
+  if (TRADE_MODE !== 'live') return { paper: true, balance: AUTO_SIZE };
+  const ts = Date.now();
+  const qs = `timestamp=${ts}`;
+  const sig = signRequest(qs);
+  const r = await fetch(`${BINANCE_CONFIG.baseURL}/fapi/v2/balance?${qs}&signature=${sig}`, {
+    headers: { 'X-MBX-APIKEY': BINANCE_CONFIG.apiKey }
+  });
+  return await r.json();
+}
+
+async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features = {}) {
   // autoTradeActive ถูก set ก่อน call แล้ว ไม่ต้อง check ซ้ำ
   autoTradeActive = true;
 
   const entry = price;
-  const LEVERAGE = 3;
   const qty   = (AUTO_SIZE * LEVERAGE) / entry;
   const endTime = Date.now() + AUTO_DURATION_MS;
 
@@ -213,6 +293,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
 
   const tradeNum = autoTrades.length + 1;
   const f = v => v.toFixed(2);
+  const _mlFeatures = features;  // เก็บไว้ log ตอน trade ปิด
 
   try {
     await tg(
@@ -267,7 +348,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
       const livePnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
       const pnl = realizedPnl + livePnl * remainRatio;
       const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'TIMEOUT', maxP, maxL, conf, partialClosed };
-      autoTrades.push(result);
+      autoTrades.push(result); logMLData(result, _mlFeatures);
       saveAutoTrades();
       await tg(`⏰ <b>Auto Trade #${tradeNum} TIMEOUT</b>\n\n${dir.toUpperCase()} Entry: $${f(entry)} → $${f(p)}\nPnL: ${pnl>=0?'+':''}$${pnl.toFixed(2)}\nMax Profit: +$${maxP.toFixed(2)} | Max Loss: $${maxL.toFixed(2)}`, true);
       if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
@@ -288,7 +369,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
         const pnl = realizedPnl + (p - entry) * qty * remainRatio;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf, partialClosed };
-        autoTrades.push(result); saveAutoTrades();
+        autoTrades.push(result); logMLData(result, _mlFeatures); saveAutoTrades();
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nLONG $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p <= sl) {
@@ -296,7 +377,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
         const pnl = realizedPnl + (p - entry) * qty * remainRatio;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'SL', maxP, maxL, conf, partialClosed };
-        autoTrades.push(result); saveAutoTrades();
+        autoTrades.push(result); logMLData(result, _mlFeatures); saveAutoTrades();
         await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nLONG $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       }
@@ -313,7 +394,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
         const pnl = realizedPnl + (entry - p) * qty * remainRatio;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf, partialClosed };
-        autoTrades.push(result); saveAutoTrades();
+        autoTrades.push(result); logMLData(result, _mlFeatures); saveAutoTrades();
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nSHORT $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p >= sl) {
@@ -321,7 +402,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs) {
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
         const pnl = realizedPnl + (entry - p) * qty * remainRatio;
         const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'SL', maxP, maxL, conf, partialClosed };
-        autoTrades.push(result); saveAutoTrades();
+        autoTrades.push(result); logMLData(result, _mlFeatures); saveAutoTrades();
         await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nSHORT $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)}`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       }
@@ -333,6 +414,34 @@ function saveAutoTrades() {
   try { fs.writeFileSync('/home/ubuntu/eth-bot/auto_trades.json', JSON.stringify(autoTrades, null, 2)); } catch {}
   // บันทึก archive ทุกครั้ง
   saveArchive();
+}
+
+// ── ML Data Pipeline — เก็บ features ทุก trade ──
+function logMLData(trade, features) {
+  try {
+    const row = {
+      ts: Date.now(),
+      // Features ตอน entry
+      dir: trade.dir,
+      entry: trade.entry,
+      rsi: features.rsi,
+      macdHist: features.macdHist,
+      atr: trade.atr || features.atr,
+      obvSlope: features.obvSlope,
+      ema50Dist: features.ema50Dist,
+      conf: trade.conf,
+      trigScore: features.trigScore,
+      fg: features.fg,
+      btcBull: features.btcBull,
+      // Outcome
+      result: trade.result,
+      pnl: trade.pnl,
+      maxP: trade.maxP,
+      maxL: trade.maxL,
+      partialClosed: trade.partialClosed || false
+    };
+    fs.appendFileSync('/home/ubuntu/eth-bot/ml_dataset.jsonl', JSON.stringify(row) + '\n');
+  } catch(e) { console.log('ML log error:', e.message); }
 }
 
 function saveArchive() {
@@ -410,13 +519,33 @@ async function analyze() {
     const fgL=fg<=25?'😱 XFear':fg<=45?'😨 Fear':fg<=55?'😐 Neutral':fg<=75?'😊 Greed':'🤑 XGreed';
     console.log(`[${new Date().toLocaleTimeString('th-TH')}] $${p} Conf:${conf}% RSI:${rsi.toFixed(0)} ${emaDir} ATR:${best.atrOK?'✓':'✗'} | ${sig} ${autoTradeActive?'[AUTO TRADING]':''}`);
 
+    // ── Micro-Momentum: บันทึก tick ──────────
+    tickHistory.push({ price, ts: now });
+    if (tickHistory.length > 12) tickHistory.shift();
+
+    // เช็คว่าราคาวิ่งสวนทิศใน 60 วินาทีล่าสุดมั้ย
+    let microOK = true;
+    if (tickHistory.length >= MICRO_LOOKBACK) {
+      const old = tickHistory[tickHistory.length - MICRO_LOOKBACK].price;
+      const change = (price - old) / old;  // +ขึ้น -ลง
+      if (entryDir === 'short' && change > MICRO_THRESHOLD) microOK = false;  // ราคาพุ่งขึ้น → ไม่เข้า SHORT
+      if (entryDir === 'long'  && change < -MICRO_THRESHOLD) microOK = false; // ราคาดิ่งลง → ไม่เข้า LONG
+    }
+
     // ── Auto Paper Trade trigger ───────────
     const cooldownOK = Date.now() > lastTradeEndTime + TRADE_COOLDOWN_MS;
 
-    if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK ) {
+    if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK && !microOK) {
+      console.log(`[MICRO-MOMENTUM] รอจังหวะ — ราคากำลังสวน ${entryDir}`);
+    } else if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK && microOK) {
       autoTradeActive = true;
       lastConfAlert = true;
-      await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score);
+      await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score, {
+        rsi, macdHist: macd1h.hist || 0, atr,
+        obvSlope: obv.slope || 0,
+        ema50Dist: ((price - best.ema50) / best.ema50 * 100),
+        trigScore: trigs.score, fg, btcBull
+      });
     } else if(!cooldownOK) {
       const remain = Math.round((lastTradeEndTime + TRADE_COOLDOWN_MS - Date.now())/60000);
       if(remain > 0) console.log(`[COOLDOWN] รอ ${remain} นาที`);
@@ -508,7 +637,7 @@ const server=http.createServer((req,res)=>{
     });
   }else if(req.method==='GET'&&req.url==='/health'){
     res.writeHead(200,{'Content-Type':'application/json'});
-    res.end(JSON.stringify({ok:true,trade:!!tradeState,autoTrade:autoTradeActive,autoCount:autoTrades.length,autoTarget:AUTO_TRADE_TARGET_DYNAMIC,autoEnabled:autoTradeEnabled,sig:lastSig}));
+    res.end(JSON.stringify({ok:true,tradeMode:TRADE_MODE,trade:!!tradeState,autoTrade:autoTradeActive,autoCount:autoTrades.length,autoTarget:AUTO_TRADE_TARGET_DYNAMIC,autoEnabled:autoTradeEnabled,sig:lastSig}));
   }else if(req.method==='GET'&&req.url==='/auto-archive'){
     try{const d=fs.readFileSync('/home/ubuntu/eth-bot/auto_trades_archive.json','utf8');res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});res.end(d);}catch{res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});res.end('[]');}
   }else if(req.method==='GET'&&req.url==='/auto-trades'){
