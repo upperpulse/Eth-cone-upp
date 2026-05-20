@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.2';
+const ETH_LOGIC_VERSION = '2.3';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -92,7 +92,7 @@ function calcTrap(klines, atr) {
   return { prob: Math.min(1, prob), alert: prob > 0.6 };
 }
 
-function calcConfidence(macd, rsi, obv, btcMacd, funding, trap) {
+function calcConfidence(macd, rsi, obv, btcMacd, funding, trap, extra = {}) {
   let score = 60;
   if (macd.positive) {
     // LONG mode
@@ -102,21 +102,21 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap) {
     if (obv.slope > 0)    score += 2;
     if (btcMacd.positive) score += 8;
     if (rsi > 32 && rsi < 55) score += 4; // sweet spot LONG
-    if (rsi < 30)         score -= 12; // extreme oversold = falling knife
-    if (rsi < 35)         score -= 6;  // oversold risky
-    if (rsi > 65)         score -= 6;  // overbought = bad LONG
+    if (rsi < 30)         score -= 12;
+    if (rsi < 35)         score -= 6;
+    if (rsi > 65)         score -= 6;
     if (rsi > 60)         score -= 3;
   } else {
     // SHORT mode
     if (macd.bearCross)    score += 5;
-    score += 8; // MACD negative
+    score += 8;
     if (!obv.positive)     score += 5;
     if (obv.slope < 0)     score += 2;
     if (!btcMacd.positive) score += 8;
-    if (rsi > 45 && rsi < 70) score += 4; // sweet spot SHORT
-    if (rsi < 35)          score -= 8;  // oversold = bounce risk สูง
-    if (rsi < 40)          score -= 4;  // กำลัง oversold
-    if (rsi > 72)          score -= 3;  // overbought = risky SHORT
+    if (rsi > 45 && rsi < 70) score += 4;
+    if (rsi < 35)          score -= 8;
+    if (rsi < 40)          score -= 4;
+    if (rsi > 72)          score -= 3;
   }
   if (!obv.divergence)      score += 2;
   if (rsi > 40 && rsi < 60) score += 2;
@@ -124,6 +124,35 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap) {
   if (funding > 0.01)       score -= 2;
   if (trap.alert)           score -= 22;
   else if (trap.prob > 0.3) score -= 5;
+
+  // ══════════════════════════════════════════
+  // NEW v2.3 — 3 confirmation factors
+  // ══════════════════════════════════════════
+  
+  // 1. Volume Confirmation
+  const volRatio = extra.volRatio;
+  if (volRatio !== undefined) {
+    if (volRatio > 1.5)      score += 5;  // institutional
+    else if (volRatio > 1.2) score += 2;
+    else if (volRatio < 0.7) score -= 8;  // low conviction (stronger)
+  }
+  
+  // 2. ATR-adjusted (penalty volatility สูง/ต่ำ)
+  const atrRatio = extra.atrRatio;
+  if (atrRatio !== undefined) {
+    if (atrRatio > 1.6)      score -= 7;  // too volatile (stronger)
+    else if (atrRatio < 0.9) score -= 3;  // sideways
+  }
+  
+  // 3. Candle Confirmation — ราคาต้องสอดคล้องทิศ
+  const candleBull = extra.candleBull;
+  if (candleBull !== undefined) {
+    if (macd.positive && !candleBull)       score -= 7; // LONG แต่ candle แดง (stronger)
+    else if (!macd.positive && candleBull)  score -= 7; // SHORT แต่ candle เขียว (stronger)
+    else if (macd.positive && candleBull)   score += 2; // LONG + candle เขียว
+    else if (!macd.positive && !candleBull) score += 2; // SHORT + candle แดง
+  }
+
   return Math.min(95, Math.max(50, Math.round(score)));
 }
 
@@ -267,13 +296,22 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
   const momentumLong  = !strongDown && !droppedDown; // LONG: ไม่เข้าตอนเพิ่งดิ่ง
   const momentumShort = !strongUp && !bouncedUp;     // SHORT: ไม่เข้าตอนเพิ่งเด้ง
 
-  // คำนวณ Conf ทั้งสองฝั่ง
-  const confLong  = calcConfidence(macd, rsi, obv, btcMacd, funding, trap);
-  
+  // ── Extra factors สำหรับ v2.3 Conf ──
+  const vols     = ethKlines.map(c => parseFloat(c[5]));
+  const avgVol   = vols.slice(-20).reduce((a,b)=>a+b,0)/20;
+  const volRatio = vols[vols.length-1] / avgVol;
+  const atrRatio = atr / avgATR;
+  const lastK    = ethKlines[ethKlines.length-1];
+  const candleBull = parseFloat(lastK[4]) > parseFloat(lastK[1]); // close > open
+
+  // คำนวณ Conf ทั้งสองฝั่ง (พร้อม extras)
+  const confExtras = { volRatio, atrRatio, candleBull };
+  const confLong   = calcConfidence(macd, rsi, obv, btcMacd, funding, trap, confExtras);
+
   // จำลอง SHORT — flip MACD และ OBV
   const macdShort = { ...macd, positive: false, bullCross: false, bearCross: !macd.positive };
   const obvShort  = { ...obv,  positive: false, slope: -Math.abs(obv.slope) };
-  const confShort = calcConfidence(macdShort, rsi, obvShort, btcMacd, funding, trap);
+  const confShort = calcConfidence(macdShort, rsi, obvShort, btcMacd, funding, trap, confExtras);
 
   // Signal ทั้งสองฝั่ง พร้อม EMA, ATR และ Momentum filter
   const opts = { aboveEMA50: trendAlignLong, belowEMA50: trendAlignShort, atrOK };
@@ -296,6 +334,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
     ema50, ema20, price, aboveEMA50, belowEMA50, atrOK,
     rsiSlope, momentumLong, momentumShort,
     aboveEMA20, belowEMA20, trendAlignLong, trendAlignShort,
+    volRatio, atrRatio, candleBull,
     bouncedUp, droppedDown, recentLow, recentHigh,
     confLong, confShort,
     sigLong, sigShort,
