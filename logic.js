@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.3';
+const ETH_LOGIC_VERSION = '2.4';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -251,9 +251,20 @@ function calcTriggers(macd, obv, btcBull, trap, fg) {
 
 // ── Best Direction Selector ──────────────────────────────────────
 // เปรียบเทียบ LONG vs SHORT แล้วเลือก Conf สูงกว่า
-function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
+function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h = null) {
   const ec = ethKlines.map(k => parseFloat(k[4]));
   const bc = btcKlines.map(k => parseFloat(k[4]));
+
+  // ── 4H Trend Filter (v2.4) — สำคัญที่สุด ──
+  let trend4hBull = null, trend4hBear = null;
+  if (ethKlines4h && ethKlines4h.length >= 50) {
+    const ec4h = ethKlines4h.map(k => parseFloat(k[4]));
+    const ema20_4h = calcEMA(ec4h, 20);
+    const ema50_4h = calcEMA(ec4h, 50);
+    const price4h  = ec4h[ec4h.length - 1];
+    trend4hBull = price4h > ema50_4h && ema20_4h > ema50_4h;
+    trend4hBear = price4h < ema50_4h && ema20_4h < ema50_4h;
+  }
 
   const macd     = calcMACD(ec);
   const btcMacd  = calcMACD(bc);
@@ -314,7 +325,14 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
   const confShort = calcConfidence(macdShort, rsi, obvShort, btcMacd, funding, trap, confExtras);
 
   // Signal ทั้งสองฝั่ง พร้อม EMA, ATR และ Momentum filter
-  const opts = { aboveEMA50: trendAlignLong, belowEMA50: trendAlignShort, atrOK };
+  // 4H filter: LONG ต้องไม่สวน 4H bear | SHORT ต้องไม่สวน 4H bull
+  const longOK4h  = trend4hBull !== false; // null (no data) ก็ผ่าน
+  const shortOK4h = trend4hBear !== false;
+  const opts = { 
+    aboveEMA50: trendAlignLong && longOK4h, 
+    belowEMA50: trendAlignShort && shortOK4h, 
+    atrOK 
+  };
   const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong});
   const sigShort = calcSignal(macdShort, obvShort, rsi, trap, confShort, {...opts, momentumOK: momentumShort});
 
@@ -335,6 +353,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg) {
     rsiSlope, momentumLong, momentumShort,
     aboveEMA20, belowEMA20, trendAlignLong, trendAlignShort,
     volRatio, atrRatio, candleBull,
+    trend4hBull, trend4hBear,
     bouncedUp, droppedDown, recentLow, recentHigh,
     confLong, confShort,
     sigLong, sigShort,
