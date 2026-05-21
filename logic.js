@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.5';
+const ETH_LOGIC_VERSION = '2.6';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -357,7 +357,40 @@ function detectMarketRegime(klines4h, klines1h) {
   };
 }
 
-function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h = null) {
+
+// ════════════════════════════════════════════════════════════
+// PHASE B — MULTI-TF CONFIRMATION
+// ════════════════════════════════════════════════════════════
+function analyzeMultiTF(klines15m, klines1h, klines4h) {
+  function getTrend(klines) {
+    if (!klines || klines.length < 50) return { dir: 'neutral', strength: 0 };
+    const cls = klines.map(k => parseFloat(k[4]));
+    const ema20 = calcEMA(cls, 20);
+    const ema50 = calcEMA(cls, 50);
+    const price = cls[cls.length - 1];
+    const gap = Math.abs(ema20 - ema50) / price * 100;
+    if (price > ema50 && ema20 > ema50) return { dir: 'bull', strength: Math.min(3, Math.floor(gap * 2)) };
+    if (price < ema50 && ema20 < ema50) return { dir: 'bear', strength: Math.min(3, Math.floor(gap * 2)) };
+    return { dir: 'neutral', strength: 0 };
+  }
+  const tf15m = getTrend(klines15m);
+  const tf1h  = getTrend(klines1h);
+  const tf4h  = getTrend(klines4h);
+  const dirs = [tf15m.dir, tf1h.dir, tf4h.dir];
+  const bullCount = dirs.filter(d => d === 'bull').length;
+  const bearCount = dirs.filter(d => d === 'bear').length;
+  let alignment, direction, score, reason;
+  if (bullCount === 3) { alignment='strong'; direction='bull'; score=10; reason='all BULL'; }
+  else if (bearCount === 3) { alignment='strong'; direction='bear'; score=10; reason='all BEAR'; }
+  else if (bullCount === 2 && bearCount === 0) { alignment='medium'; direction='bull'; score=5; reason='2 bull + neutral'; }
+  else if (bearCount === 2 && bullCount === 0) { alignment='medium'; direction='bear'; score=5; reason='2 bear + neutral'; }
+  else if (bullCount === 2 && bearCount === 1) { alignment='conflicted'; direction='bull'; score=-5; reason='mixed bull/bear'; }
+  else if (bearCount === 2 && bullCount === 1) { alignment='conflicted'; direction='bear'; score=-5; reason='mixed bear/bull'; }
+  else { alignment='weak'; direction='neutral'; score=-3; reason='No alignment'; }
+  return { alignment, direction, score, reason, details: { tf15m: tf15m.dir, tf1h: tf1h.dir, tf4h: tf4h.dir, bullCount, bearCount } };
+}
+
+function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h = null, ethKlines15m = null) {
   const ec = ethKlines.map(k => parseFloat(k[4]));
   const bc = btcKlines.map(k => parseFloat(k[4]));
 
@@ -376,6 +409,12 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   let regime = null;
   if (ethKlines4h && ethKlines4h.length >= 50) {
     regime = detectMarketRegime(ethKlines4h, ethKlines);
+  }
+
+  // ── Multi-TF Confirmation (v2.6 — Phase B) ──
+  let multitf = null;
+  if (ethKlines15m && ethKlines4h) {
+    multitf = analyzeMultiTF(ethKlines15m, ethKlines, ethKlines4h);
   }
 
   const macd     = calcMACD(ec);
@@ -431,23 +470,27 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   const confExtras = { volRatio, atrRatio, candleBull };
   let confLong   = calcConfidence(macd, rsi, obv, btcMacd, funding, trap, confExtras);
   if (regime) confLong = Math.max(50, Math.min(95, confLong + regime.score));
+  if (multitf && multitf.direction === 'bull') confLong = Math.max(50, Math.min(95, confLong + multitf.score));
+  if (multitf && multitf.direction === 'bear') confLong = Math.max(50, Math.min(95, confLong - Math.abs(multitf.score)));
 
   // จำลอง SHORT — flip MACD และ OBV
   const macdShort = { ...macd, positive: false, bullCross: false, bearCross: !macd.positive };
   const obvShort  = { ...obv,  positive: false, slope: -Math.abs(obv.slope) };
   let confShort = calcConfidence(macdShort, rsi, obvShort, btcMacd, funding, trap, confExtras);
   if (regime) confShort = Math.max(50, Math.min(95, confShort + regime.score));
+  if (multitf && multitf.direction === 'bear') confShort = Math.max(50, Math.min(95, confShort + multitf.score));
+  if (multitf && multitf.direction === 'bull') confShort = Math.max(50, Math.min(95, confShort - Math.abs(multitf.score)));
 
   // Signal ทั้งสองฝั่ง พร้อม EMA, ATR และ Momentum filter
-  // 4H filter + Regime check
+  // 4H filter + Regime + Multi-TF
   const longOK4h  = trend4hBull !== false;
   const shortOK4h = trend4hBear !== false;
-  
-  // Regime: block ตอน VOLATILE/RANGING (ยกเว้น Conf สูงมาก)
-  const regimeOK = !regime || (regime.regime !== 'VOLATILE' && regime.regime !== 'RANGING');
+  const regimeOK  = !regime || (regime.regime !== 'VOLATILE' && regime.regime !== 'RANGING');
+  const longOKtf  = !multitf || multitf.direction === 'bull' || multitf.direction === 'neutral';
+  const shortOKtf = !multitf || multitf.direction === 'bear' || multitf.direction === 'neutral';
   const opts = { 
-    aboveEMA50: trendAlignLong && longOK4h && regimeOK, 
-    belowEMA50: trendAlignShort && shortOK4h && regimeOK, 
+    aboveEMA50: trendAlignLong && longOK4h && regimeOK && longOKtf, 
+    belowEMA50: trendAlignShort && shortOK4h && regimeOK && shortOKtf, 
     atrOK 
   };
   const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong});
@@ -471,7 +514,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     aboveEMA20, belowEMA20, trendAlignLong, trendAlignShort,
     volRatio, atrRatio, candleBull,
     trend4hBull, trend4hBear,
-    regime,
+    regime, multitf,
     bouncedUp, droppedDown, recentLow, recentHigh,
     confLong, confShort,
     sigLong, sigShort,
@@ -485,6 +528,7 @@ const ETH_LOGIC = {
   version: ETH_LOGIC_VERSION,
   CONF_THRESHOLD,
   detectMarketRegime,
+  analyzeMultiTF,
   calcEMA,
   calcMACD,
   calcRSI,

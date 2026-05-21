@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.25
+// ETH Cone Bot v3.26
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.25'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.26'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.29';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -494,13 +494,13 @@ async function analyze() {
   try {
     if (tradeState) return;
 
-    const [ethK,ethK4h,btcK,price,funding,fg] = await Promise.all([fetchKlines('ETHUSDT','1h',80),fetchKlines('ETHUSDT','4h',60),fetchKlines('BTCUSDT','1h',60),fetchPrice(),fetchFunding(),fetchFG()]);
+    const [ethK,ethK4h,ethK15m,btcK,price,funding,fg] = await Promise.all([fetchKlines('ETHUSDT','1h',80),fetchKlines('ETHUSDT','4h',60),fetchKlines('ETHUSDT','15m',60),fetchKlines('BTCUSDT','1h',60),fetchPrice(),fetchFunding(),fetchFG()]);
     const ec=ethK.map(k=>parseFloat(k[4])),bc=btcK.map(k=>parseFloat(k[4]));
     // คำนวณ trap ก่อน แล้วส่งเข้า calcBestDirection
     const atrTemp = calcATR(ethK, 14);
     const trapTemp = calcTrap(ethK, atrTemp);
     // ── เปรียบเทียบทั้งสองฝั่ง เลือก Conf สูงกว่า ──
-    const best    = calcBestDirection(ethK, btcK, funding, trapTemp, fg, ethK4h);
+    const best    = calcBestDirection(ethK, btcK, funding, trapTemp, fg, ethK4h, ethK15m);
     const macd1h  = best.macd;
     const btcMacd = best.btcMacd;
     const rsi     = best.rsi;
