@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.4';
+const ETH_LOGIC_VERSION = '2.5';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -251,11 +251,117 @@ function calcTriggers(macd, obv, btcBull, trap, fg) {
 
 // ── Best Direction Selector ──────────────────────────────────────
 // เปรียบเทียบ LONG vs SHORT แล้วเลือก Conf สูงกว่า
+
+// ════════════════════════════════════════════════════════════
+// PHASE A — MARKET REGIME DETECTOR
+// ════════════════════════════════════════════════════════════
+// คำนวณสภาพตลาดจริงจาก price action 
+// Output: { regime, score, details } 
+//
+// regime: 'TRENDING' | 'RANGING' | 'VOLATILE' | 'TRANSITION'
+
+function detectMarketRegime(klines4h, klines1h) {
+  // ใช้ 4H เป็นหลัก (ภาพรวม), 1H เป็น confirmation
+  const cls4h = klines4h.map(k => parseFloat(k[4]));
+  const cls1h = klines1h.map(k => parseFloat(k[4]));
+  const recent4h = cls4h.slice(-50);
+  const recent1h = cls1h.slice(-50);
+
+  const price = cls4h[cls4h.length - 1];
+
+  // 1. ATR analysis (volatility)
+  const atr4h = calcATR(klines4h, 14);
+  const avgATR = calcATR(klines4h, 50);
+  const atrRatio = atr4h / avgATR;
+  const atrPct = (atr4h / price) * 100;  // ATR เป็น % ของราคา
+
+  // 2. Range analysis
+  const high4h = Math.max(...recent4h);
+  const low4h = Math.min(...recent4h);
+  const rangePct = ((high4h - low4h) / price) * 100;
+
+  // 3. EMA trend strength
+  const ema20_4h = calcEMA(cls4h, 20);
+  const ema50_4h = calcEMA(cls4h, 50);
+  const emaGapPct = Math.abs((ema20_4h - ema50_4h) / price) * 100;
+  const emaDirection = ema20_4h > ema50_4h ? 'bull' : 'bear';
+
+  // 4. EMA crossover detection (transition)
+  const ema20_prev = calcEMA(cls4h.slice(0, -3), 20);
+  const ema50_prev = calcEMA(cls4h.slice(0, -3), 50);
+  const wasAbove = ema20_prev > ema50_prev;
+  const isAbove = ema20_4h > ema50_4h;
+  const justCrossed = wasAbove !== isAbove;
+
+  // 5. Trend consistency (1H confirms 4H)
+  const ema20_1h = calcEMA(cls1h, 20);
+  const ema50_1h = calcEMA(cls1h, 50);
+  const dir1h = ema20_1h > ema50_1h ? 'bull' : 'bear';
+  const tfAlign = dir1h === emaDirection;
+
+  // ── Decision Logic ──
+  let regime = 'TRANSITION';
+  let score = 0;
+  let reason = '';
+
+  // VOLATILE — ATR สูงเกิน
+  if (atrRatio > 2.0) {
+    regime = 'VOLATILE';
+    score = -10;
+    reason = `ATR ${atrRatio.toFixed(2)}× avg — อันตราย`;
+  }
+  // TRANSITION — EMA เพิ่ง cross
+  else if (justCrossed) {
+    regime = 'TRANSITION';
+    score = -5;
+    reason = 'EMA20/50 เพิ่ง cross — รอ stable';
+  }
+  // RANGING — range แคบ + ATR ต่ำ
+  else if (rangePct < 2.5 && atrPct < 0.8) {
+    regime = 'RANGING';
+    score = -8;
+    reason = `Range ${rangePct.toFixed(1)}% — sideways`;
+  }
+  // TRENDING — EMA ห่าง + tfAlign
+  else if (emaGapPct > 1.0 && tfAlign) {
+    regime = 'TRENDING';
+    score = +10;
+    reason = `${emaDirection.toUpperCase()} trend — EMA gap ${emaGapPct.toFixed(2)}%`;
+  }
+  // WEAK TRENDING — EMA ห่างพอแต่ TF ไม่ตรง
+  else if (emaGapPct > 0.5) {
+    regime = 'TRENDING';
+    score = +3;
+    reason = `Weak ${emaDirection.toUpperCase()} — TF mixed`;
+  }
+  // Default — neutral
+  else {
+    regime = 'RANGING';
+    score = -3;
+    reason = 'Neutral — ไม่ชัด';
+  }
+
+  return {
+    regime,
+    score,
+    reason,
+    direction: emaDirection,  // bull/bear (ทิศ trend ใหญ่)
+    details: {
+      atrRatio: +atrRatio.toFixed(2),
+      atrPct: +atrPct.toFixed(2),
+      rangePct: +rangePct.toFixed(2),
+      emaGapPct: +emaGapPct.toFixed(2),
+      justCrossed,
+      tfAlign
+    }
+  };
+}
+
 function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h = null) {
   const ec = ethKlines.map(k => parseFloat(k[4]));
   const bc = btcKlines.map(k => parseFloat(k[4]));
 
-  // ── 4H Trend Filter (v2.4) — สำคัญที่สุด ──
+  // ── 4H Trend Filter (v2.4) ──
   let trend4hBull = null, trend4hBear = null;
   if (ethKlines4h && ethKlines4h.length >= 50) {
     const ec4h = ethKlines4h.map(k => parseFloat(k[4]));
@@ -264,6 +370,12 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     const price4h  = ec4h[ec4h.length - 1];
     trend4hBull = price4h > ema50_4h && ema20_4h > ema50_4h;
     trend4hBear = price4h < ema50_4h && ema20_4h < ema50_4h;
+  }
+
+  // ── Market Regime Detector (v2.5 — Phase A) ──
+  let regime = null;
+  if (ethKlines4h && ethKlines4h.length >= 50) {
+    regime = detectMarketRegime(ethKlines4h, ethKlines);
   }
 
   const macd     = calcMACD(ec);
@@ -317,20 +429,25 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
 
   // คำนวณ Conf ทั้งสองฝั่ง (พร้อม extras)
   const confExtras = { volRatio, atrRatio, candleBull };
-  const confLong   = calcConfidence(macd, rsi, obv, btcMacd, funding, trap, confExtras);
+  let confLong   = calcConfidence(macd, rsi, obv, btcMacd, funding, trap, confExtras);
+  if (regime) confLong = Math.max(50, Math.min(95, confLong + regime.score));
 
   // จำลอง SHORT — flip MACD และ OBV
   const macdShort = { ...macd, positive: false, bullCross: false, bearCross: !macd.positive };
   const obvShort  = { ...obv,  positive: false, slope: -Math.abs(obv.slope) };
-  const confShort = calcConfidence(macdShort, rsi, obvShort, btcMacd, funding, trap, confExtras);
+  let confShort = calcConfidence(macdShort, rsi, obvShort, btcMacd, funding, trap, confExtras);
+  if (regime) confShort = Math.max(50, Math.min(95, confShort + regime.score));
 
   // Signal ทั้งสองฝั่ง พร้อม EMA, ATR และ Momentum filter
-  // 4H filter: LONG ต้องไม่สวน 4H bear | SHORT ต้องไม่สวน 4H bull
-  const longOK4h  = trend4hBull !== false; // null (no data) ก็ผ่าน
+  // 4H filter + Regime check
+  const longOK4h  = trend4hBull !== false;
   const shortOK4h = trend4hBear !== false;
+  
+  // Regime: block ตอน VOLATILE/RANGING (ยกเว้น Conf สูงมาก)
+  const regimeOK = !regime || (regime.regime !== 'VOLATILE' && regime.regime !== 'RANGING');
   const opts = { 
-    aboveEMA50: trendAlignLong && longOK4h, 
-    belowEMA50: trendAlignShort && shortOK4h, 
+    aboveEMA50: trendAlignLong && longOK4h && regimeOK, 
+    belowEMA50: trendAlignShort && shortOK4h && regimeOK, 
     atrOK 
   };
   const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong});
@@ -354,6 +471,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     aboveEMA20, belowEMA20, trendAlignLong, trendAlignShort,
     volRatio, atrRatio, candleBull,
     trend4hBull, trend4hBear,
+    regime,
     bouncedUp, droppedDown, recentLow, recentHigh,
     confLong, confShort,
     sigLong, sigShort,
@@ -366,6 +484,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
 const ETH_LOGIC = {
   version: ETH_LOGIC_VERSION,
   CONF_THRESHOLD,
+  detectMarketRegime,
   calcEMA,
   calcMACD,
   calcRSI,
