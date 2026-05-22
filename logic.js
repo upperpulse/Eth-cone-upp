@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.6';
+const ETH_LOGIC_VERSION = '2.7';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -157,7 +157,8 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap, extra = {}) {
 }
 
 function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
-  const confOK    = conf >= 80;
+  const threshold = options.threshold !== undefined ? options.threshold : 80;
+  const confOK    = conf >= threshold;
   const rsiOB     = rsi > 62;
   const goOnly    = options.goOnly || false;     // true = GO cross เท่านั้น
   const aboveEMA  = options.aboveEMA50 !== undefined ? options.aboveEMA50 : true;
@@ -172,7 +173,7 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   // Block extreme RSI trap เมื่อ Conf สูงมาก
   const extremeRSI = conf >= 90 && (rsi < 35 || rsi > 65);
   if (!confOK) {
-    sig = `HOLD — Conf ต่ำ (${conf}%)`;
+    sig = `HOLD — Conf ต่ำ (${conf}% / ต้อง ${threshold}%)`;
   } else if (extremeRSI) {
     sig = `HOLD — RSI Extreme (${rsi.toFixed(0)}) Trap Risk`;
   } else if (trap.alert) {
@@ -485,13 +486,28 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   // 4H filter + Regime + Multi-TF
   const longOK4h  = trend4hBull !== false;
   const shortOK4h = trend4hBear !== false;
-  const regimeOK  = !regime || (regime.regime !== 'VOLATILE' && regime.regime !== 'RANGING');
+  const regimeOK  = !regime || (regime.regime !== 'VOLATILE');  // VOLATILE block, RANGING ผ่าน (ใช้ threshold คุม)
   const longOKtf  = !multitf || multitf.direction === 'bull' || multitf.direction === 'neutral';
   const shortOKtf = !multitf || multitf.direction === 'bear' || multitf.direction === 'neutral';
+
+  // ── Adaptive Threshold (v2.7) ──
+  // ปรับ threshold ตามสภาพตลาด
+  let threshold = 80;
+  if (regime) {
+    if (regime.regime === 'TRENDING') threshold = 75;     // ตลาด trend ชัด → ผ่อน
+    else if (regime.regime === 'RANGING') threshold = 85; // sideways → เข้มขึ้น
+    else if (regime.regime === 'VOLATILE') threshold = 90;// อันตราย → เข้มมาก
+    else if (regime.regime === 'TRANSITION') threshold = 82; // เปลี่ยน → กลาง
+  }
+  if (multitf && multitf.alignment === 'strong') threshold -= 3; // TF align ดี → ผ่อน
+  if (multitf && multitf.alignment === 'conflicted') threshold += 5; // TF mixed → เข้มขึ้น
+  threshold = Math.max(70, Math.min(92, threshold));
+
   const opts = { 
     aboveEMA50: trendAlignLong && longOK4h && regimeOK && longOKtf, 
     belowEMA50: trendAlignShort && shortOK4h && regimeOK && shortOKtf, 
-    atrOK 
+    atrOK,
+    threshold  // ส่งเข้า calcSignal
   };
   const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong});
   const sigShort = calcSignal(macdShort, obvShort, rsi, trap, confShort, {...opts, momentumOK: momentumShort});
@@ -514,7 +530,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     aboveEMA20, belowEMA20, trendAlignLong, trendAlignShort,
     volRatio, atrRatio, candleBull,
     trend4hBull, trend4hBear,
-    regime, multitf,
+    regime, multitf, threshold,
     bouncedUp, droppedDown, recentLow, recentHigh,
     confLong, confShort,
     sigLong, sigShort,
