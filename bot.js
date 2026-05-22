@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.26
+// ETH Cone Bot v3.27
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.26'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.27'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.29';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -167,7 +167,7 @@ async function pollTelegram() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: chatId,
-            text: `📋 <b>Commands</b>\n\n/start — เปิด Dashboard\n/dashboard — เปิด Dashboard\n/status — ดูสถานะ Bot\n/stop — หยุด Auto Trade\n/help — แสดง commands`,
+            text: `📋 <b>Commands</b>\n\n/start — เปิด Dashboard\n/dashboard — เปิด Dashboard\n/status — ดูสถานะ Bot\n/stop — หยุด Auto Trade\n/weekly — สรุปผล 7 วัน\n/help — แสดง commands`,
             parse_mode: 'HTML'
           })
         });
@@ -177,6 +177,77 @@ async function pollTelegram() {
 }
 
 // Poll ทุก 3 วินาที
+
+// ══════════════════════════════════════════════
+// WEEKLY SUMMARY — ส่งทุกอาทิตย์ตอน 09:00 ICT
+// ══════════════════════════════════════════════
+async function sendWeeklySummary() {
+  try {
+    const archivePath = '/home/ubuntu/eth-bot/auto_trades_archive.json';
+    let archive = [];
+    try { archive = JSON.parse(fs.readFileSync(archivePath, 'utf8')); } catch {}
+
+    const now = Date.now();
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const weekTrades = archive.filter(t => (t.ts || 0) >= weekAgo);
+
+    if (weekTrades.length === 0) {
+      await tg('📊 <b>Weekly Summary</b>\n\nไม่มี trades ในรอบ 7 วัน', false);
+      return;
+    }
+
+    const wins = weekTrades.filter(t => t.result==='TP1'||t.result==='TP2'||(t.result==='TIMEOUT'&&t.pnl>0));
+    const losses = weekTrades.filter(t => !(t.result==='TP1'||t.result==='TP2'||(t.result==='TIMEOUT'&&t.pnl>0)));
+    const totalPnl = weekTrades.reduce((a,t)=>a+(t.pnl||0), 0);
+    const longs = weekTrades.filter(t => t.dir==='long');
+    const shorts = weekTrades.filter(t => t.dir==='short');
+    const wr = (wins.length/weekTrades.length*100).toFixed(0);
+    const avgWin = wins.length ? wins.reduce((a,t)=>a+t.pnl,0)/wins.length : 0;
+    const avgLoss = losses.length ? Math.abs(losses.reduce((a,t)=>a+t.pnl,0)/losses.length) : 1;
+    const payoff = avgLoss > 0 ? (avgWin/avgLoss).toFixed(2) : 'N/A';
+    const W = wins.length/weekTrades.length;
+    const R = avgLoss > 0 ? avgWin/avgLoss : 0;
+    const kelly = R > 0 ? ((W - (1-W)/R) * 100).toFixed(0) : 'N/A';
+    const verdict = kelly > 0 ? '✅ Kelly บวก — กำไรระยะยาว' : '⚠️ Kelly ลบ — ต้องปรับ';
+
+    const msg = `📊 <b>Weekly Summary</b>\n\n` +
+      `📅 7 วันที่ผ่านมา\n` +
+      `━━━━━━━━━━━━━━━━━━\n` +
+      `📈 Total Trades: ${weekTrades.length}\n` +
+      `✅ Wins: ${wins.length} | ❌ Losses: ${losses.length}\n` +
+      `🎯 Win Rate: <b>${wr}%</b>\n` +
+      `💰 Total PnL: <b>${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)}</b>\n` +
+      `\n` +
+      `📊 Direction:\n` +
+      `🟢 LONG: ${longs.length} trades\n` +
+      `🔴 SHORT: ${shorts.length} trades\n` +
+      `\n` +
+      `📐 Risk Metrics:\n` +
+      `Avg Win: $${avgWin.toFixed(2)}\n` +
+      `Avg Loss: $${avgLoss.toFixed(2)}\n` +
+      `Payoff Ratio: ${payoff}\n` +
+      `Kelly: ${kelly}%\n` +
+      `\n` +
+      `${verdict}`;
+    await tg(msg, false);
+  } catch(e) {
+    console.log('Weekly summary error:', e.message);
+  }
+}
+
+// Check ทุกชั่วโมง — ถ้าตรง 09:00 ICT วันจันทร์ → ส่ง summary
+let lastWeeklyDate = '';
+setInterval(() => {
+  const now = new Date();
+  const ictH = (now.getUTCHours() + 7) % 24;
+  const today = now.toISOString().slice(0, 10);
+  // ส่งทุกวันจันทร์ตอน 09:00 ICT (Sunday UTC = day 0)
+  if (now.getUTCDay() === 1 && ictH === 9 && today !== lastWeeklyDate) {
+    lastWeeklyDate = today;
+    sendWeeklySummary();
+  }
+}, 60 * 1000); // เช็คทุกนาที
+
 setInterval(pollTelegram, 3000);
 
 // ── Auto sync logic.js จาก GitHub ──────────────
