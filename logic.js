@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.7';
+const ETH_LOGIC_VERSION = '2.8';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -179,7 +179,7 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   } else if (trap.alert) {
     sig = 'NO GO — TRAP DETECTED';
   } else if (!atrOK) {
-    sig = 'HOLD — ATR ต่ำเกิน (Sideways)';
+    sig = 'HOLD — ตลาด Sideways (ATR < 0.7%)';
   } else if (!momentumOK) {
     sig = 'HOLD — รอจังหวะ (Counter-Momentum)';
 
@@ -442,7 +442,9 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   const droppedDown = (recentHigh - price) / recentHigh > 0.012; // ดิ่งลง >1.2%
   // Minimum ATR filter — ไม่เทรดตอน sideways
   const avgATR   = calcATR(ethKlines, 20);
-  const atrOK    = atr > avgATR * 0.8 && atr < avgATR * 1.8; // ATR ต้องอยู่ใน active range ไม่ volatile เกิน
+  const atrPct   = (atr / price) * 100;
+  // ATR ต้อง > 0.7% ของราคา ถึงจะเทรด (block sideways ทันที)
+  const atrOK    = atr > avgATR * 0.8 && atr < avgATR * 1.8 && atrPct > 0.7;
 
   // ── Momentum Confirmation — ไม่เข้าสวน micro-momentum ──
   // ดู 3 candle ล่าสุด + RSI slope
@@ -486,7 +488,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   // 4H filter + Regime + Multi-TF
   const longOK4h  = trend4hBull !== false;
   const shortOK4h = trend4hBear !== false;
-  const regimeOK  = !regime || (regime.regime !== 'VOLATILE');  // VOLATILE block, RANGING ผ่าน (ใช้ threshold คุม)
+  const regimeOK  = !regime || (regime.regime !== 'VOLATILE' && regime.regime !== 'RANGING'); // block both VOLATILE และ RANGING
   const longOKtf  = !multitf || multitf.direction === 'bull' || multitf.direction === 'neutral';
   const shortOKtf = !multitf || multitf.direction === 'bear' || multitf.direction === 'neutral';
 
@@ -528,7 +530,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     ema50, ema20, price, aboveEMA50, belowEMA50, atrOK,
     rsiSlope, momentumLong, momentumShort,
     aboveEMA20, belowEMA20, trendAlignLong, trendAlignShort,
-    volRatio, atrRatio, candleBull,
+    volRatio, atrRatio, atrPct, candleBull,
     trend4hBull, trend4hBear,
     regime, multitf, threshold,
     bouncedUp, droppedDown, recentLow, recentHigh,
