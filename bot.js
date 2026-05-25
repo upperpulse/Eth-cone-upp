@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.27
+// ETH Cone Bot v3.28
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.27'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.28'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.29';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -52,7 +52,8 @@ const AUTO_DURATION_MS  = 7200000; // 2H
 const AUTO_SIZE         = 100;  // $100
 
 // ── Trade Mode Config ──────────────────────────
-const TRADE_MODE = 'paper';  // 'paper' = จำลอง | 'live' = เทรดจริง Binance
+const TRADE_MODE = 'paper';
+const SUMMARY_START_TS = 1779033600000; // ~16 พ.ค. — เริ่มนับ summary จาก R9  // 'paper' = จำลอง | 'live' = เทรดจริง Binance
 // Binance API config (ใช้ตอน TRADE_MODE='live' — ยังไม่เปิดใช้)
 const BINANCE_CONFIG = {
   apiKey:    process.env.BINANCE_API_KEY    || '',
@@ -187,14 +188,14 @@ async function sendWeeklySummary() {
     let archive = [];
     try { archive = JSON.parse(fs.readFileSync(archivePath, 'utf8')); } catch {}
 
-    const now = Date.now();
-    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-    const weekTrades = archive.filter(t => (t.ts || 0) >= weekAgo);
+    // นับ trades จาก SUMMARY_START_TS (เริ่มจาก R9)
+    const weekTrades = archive.filter(t => (t.ts || 0) >= SUMMARY_START_TS);
 
     if (weekTrades.length === 0) {
-      await tg('📊 <b>Weekly Summary</b>\n\nไม่มี trades ในรอบ 7 วัน', false);
+      await tg('📊 <b>Performance Summary</b>\n\nไม่มี trades ตั้งแต่เริ่มนับ', false);
       return;
     }
+    const daysCovered = Math.round((Date.now() - SUMMARY_START_TS) / 86400000);
 
     const wins = weekTrades.filter(t => t.result==='TP1'||t.result==='TP2'||(t.result==='TIMEOUT'&&t.pnl>0));
     const losses = weekTrades.filter(t => !(t.result==='TP1'||t.result==='TP2'||(t.result==='TIMEOUT'&&t.pnl>0)));
