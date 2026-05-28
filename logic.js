@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.8';
+const ETH_LOGIC_VERSION = '2.9';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -99,7 +99,8 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap, extra = {}) {
     if (macd.bullCross)   score += 5;
     score += 8; // MACD positive
     if (obv.positive)     score += 5;
-    if (obv.slope > 0)    score += 2;
+    if (obv.slope > 0)    score += 8;   // เพิ่มจาก 2 → 8 (ML: OBV ทำนายดีสุด)
+    if (obv.slope < 0)    score -= 10;  // LONG แต่ OBV ลง = ไม่มีแรงซื้อ → penalty
     if (btcMacd.positive) score += 8;
     if (rsi > 32 && rsi < 55) score += 4; // sweet spot LONG
     if (rsi < 30)         score -= 12;
@@ -111,7 +112,8 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap, extra = {}) {
     if (macd.bearCross)    score += 5;
     score += 8;
     if (!obv.positive)     score += 5;
-    if (obv.slope < 0)     score += 2;
+    if (obv.slope < 0)     score += 8;  // เพิ่มจาก 2 → 8 (ML: OBV ทำนายดีสุด)
+    if (obv.slope > 0)     score -= 10; // SHORT แต่ OBV ขึ้น = ไม่มีแรงขาย → penalty
     if (!btcMacd.positive) score += 8;
     if (rsi > 45 && rsi < 70) score += 4;
     if (rsi < 35)          score -= 8;
