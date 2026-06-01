@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETH Cone v5.30 — nattajoe</title>
+<title>ETH Cone v5.31 — nattajoe</title>
 <link rel="manifest" href="/Eth-cone-upp/manifest.json">
 <meta name="theme-color" content="#02080f">
 <meta name="mobile-web-app-capable" content="yes">
@@ -258,7 +258,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 
 <div class="hdr">
   <div>
-    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.30</span></div>
+    <div class="brand-title">ETH <span>CONE</span> MODEL <span style="color:var(--yellow)">v5.31</span></div>
   <div id="modeSwitch" style="display:flex;gap:6px;align-items:center;justify-content:center;margin:6px 0;font-size:9px;">
     <span style="color:var(--muted);">MODE:</span>
     <button id="modePaper" class="cbtn cy on" onclick="setTradeMode('paper')" style="font-size:9px;padding:4px 12px;">🧪 PAPER</button>
@@ -300,6 +300,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   <div class="tab" onclick="sw('multitf')">📈 MULTI-TF</div>
   <div class="tab" onclick="sw('history')">📋 HISTORY</div>
   <div class="tab" onclick="sw('analytics')">📊 ANALYTICS</div>
+  <div class="tab" onclick="sw('burst')">🔥 BURST</div>
   <div class="tab" onclick="sw('live')" id="tab-btn-live" style="display:none;">🔴 LIVE</div>
 </div>
 
@@ -886,6 +887,36 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 </div>
 
 
+<!-- BURST HUNTER TAB (Engine B) -->
+<div class="tab-content" id="tab-burst" style="display:none;">
+  <div class="card" style="border-color:rgba(251,146,60,.5);margin-bottom:10px;">
+    <div class="ctitle" style="color:#fb923c;">🔥 BURST HUNTER — Engine B</div>
+    <div style="font-size:9px;color:var(--muted);margin-bottom:8px;line-height:1.6;">
+      จับจังหวะก่อน breakout — ATR Squeeze + Volume Building<br>
+      TP ใหญ่ (ATR×4.5) · SL แคบ (ATR×0.5) · 45 นาที · แยกจาก Trend Trader
+    </div>
+    <div class="angrid">
+      <div class="anbox"><div class="anlbl">TOTAL</div><div class="anval" id="burstTotal" style="color:#fb923c;">—</div></div>
+      <div class="anbox"><div class="anlbl">WIN</div><div class="anval" id="burstWins" style="color:var(--green);">—</div></div>
+      <div class="anbox"><div class="anlbl">WIN RATE</div><div class="anval" id="burstWR" style="color:var(--yellow);">—</div></div>
+      <div class="anbox"><div class="anlbl">TP HITS</div><div class="anval" id="burstTP" style="color:var(--green);">—</div></div>
+      <div class="anbox"><div class="anlbl">TOTAL PnL</div><div class="anval" id="burstPnl">—</div></div>
+      <div class="anbox"><div class="anlbl">STATUS</div><div class="anval" id="burstStatus" style="font-size:11px;">—</div></div>
+    </div>
+  </div>
+  <div class="card yw">
+    <div class="ctitle" style="color:#fb923c;">🔥 BURST TRADE LOG</div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;font-size:9px;font-family:'Share Tech Mono',monospace;border-collapse:collapse;" id="burstTable">
+        <thead><tr style="color:var(--muted);border-bottom:1px solid rgba(255,255,255,.1);">
+          <th style="padding:4px;text-align:left;">#</th><th>DIR</th><th>ENTRY</th><th>EXIT</th><th>PnL</th><th>STR</th><th>RESULT</th>
+        </tr></thead>
+        <tbody id="burstTableBody"><tr><td colspan="7" style="text-align:center;padding:10px;color:var(--muted);">ยังไม่มี burst trades</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- LIVE TRADING TAB -->
 <div class="tab-content" id="tab-live" style="display:none;">
   <div class="card" style="border-color:rgba(239,68,68,.5);margin-bottom:10px;">
@@ -928,7 +959,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   </div>
 </div>
 
-<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.30 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
+<div class="footer">⚡ BINANCE FUTURES PUBLIC API · Cone Model v5.31 · nattajoe · PAPER TRADE ONLY <span class="blink">_</span></div>
 </div>
 
 <!-- BIG ALERT OVERLAY -->
@@ -958,7 +989,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 <script src="logic.js"></script>
 <script>
 // ═══════════════════════════════════════
-// ETH CONE ULTIMATE v5.30 — nattajoe
+// ETH CONE ULTIMATE v5.31 — nattajoe
 // FIXES: fundingRate state, Backtest Both-side, Confidence Normalize,
 //        OBV Divergence 15-candle, crossBonus proportional,
 //        Whale Liq Dynamic, OBV Slope fix,
@@ -1249,7 +1280,7 @@ async function requestNotif(){
     el('btnNotif').textContent='✅ Notification On';
     addLog('✅ Permission ได้รับ — พร้อมส่ง Status Bar Notification','var(--green)','var(--green)');
     // ทดสอบทันที
-    await sendNotif('🔔 ETH Cone v5.30 พร้อม!','Notification ทำงานแล้ว ✅','test');
+    await sendNotif('🔔 ETH Cone v5.31 พร้อม!','Notification ทำงานแล้ว ✅','test');
     // ลอง register SW (optional)
     await registerSW();
   }else{
@@ -1267,7 +1298,7 @@ function setTV(id,val,color='var(--text)'){const e=el(id);if(e){e.textContent=va
 
 // Tabs
 function sw(t){
-  const ids=['main','trigger','alerts','trade','multitf','history','analytics','live'];
+  const ids=['main','trigger','alerts','trade','multitf','history','analytics','burst','live'];
   document.querySelectorAll('.tab').forEach((e)=>{
     const tabFor = e.getAttribute('onclick');
     if(tabFor) e.classList.toggle('active', tabFor.includes("'"+t+"'"));
@@ -1280,6 +1311,7 @@ function sw(t){
   if(t==='multitf')fetchAllTF();
   if(t==='trade'){calcHoldSuggest();updateRiskDashboard();fetchSignalQuality();}
   if(t==='live'){fetchLivePosition();}
+  if(t==='burst'){loadBurstTrades();}
 }
 
 // Log
@@ -1432,7 +1464,7 @@ function normalizeConf(raw,maxRaw,cap=96){
   return Math.min(cap,Math.max(50,Math.round((raw/maxRaw)*100)));}
 
 // ═══════════════════════════════════════
-// BASELINE ENGINE v5.30
+// BASELINE ENGINE v5.31
 // ═══════════════════════════════════════
 async function runEngine(kd){
   const h1=kd['1h'],h4=kd['4h'],d1=kd['1d'];
@@ -1552,7 +1584,7 @@ async function runEngine(kd){
   // เก็บ base values สำหรับ Live Adjustment
   liveBaseLC=lConf;liveBaseSC=sConf;liveRSI=rsi;
 
-  // Smart Entry Delay — v5.30
+  // Smart Entry Delay — v5.31
   // ลำดับ: Conf ≥ 75% ก่อน → แล้วค่อยตรวจ Trigger
   const macdReady=macd1h.cross||macd1h.positive;
   const macdCross=macd1h.cross;
@@ -1832,7 +1864,7 @@ async function reanalyze(){
     {t:'Funding Rate State (FIX 1)...',p:84},
     {t:'Rolling Backtest Both-side (FIX 2)...',p:90},
     {t:'Confidence Normalize (FIX 3)...',p:95},
-    {t:'✅ Baseline v5.30 Ready',p:100}];
+    {t:'✅ Baseline v5.31 Ready',p:100}];
   for(const s of steps){el('anStep').textContent=s.t;el('anPF').style.width=s.p+'%';await new Promise(r=>setTimeout(r,300));}
   // ตรวจว่าเปิดจาก local file
   const isLocal=location.protocol==='file:'||location.protocol==='content:';
@@ -1871,8 +1903,8 @@ async function reanalyze(){
   try{
     await runEngine({'1h':k1h,'4h':k4h,'1d':k1d,'btc':kBTC,'fg':fg,'bt':bt});
     await update();
-    addLog(`🔄 v5.30 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
-    sendNotif('ETH Cone v5.30 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
+    addLog(`🔄 v5.31 Ready — F&G:${fg} | BT-L:${(bt.ratioL*100).toFixed(0)}% BT-S:${(bt.ratioS*100).toFixed(0)}% | FR:${fundingRate.toFixed(4)}%`,'var(--cyan)','var(--cyan)');
+    sendNotif('ETH Cone v5.31 🔄','F&G:'+fg+' · BT:'+bt.score+'/100 · $'+fmt(curPrice));
     // บันทึก session ล่าสุด
     saveAnalysisSession();
   }catch(e){
@@ -2416,7 +2448,7 @@ function showAlert(cls,icon,title,price,desc,color,btns,summary='',showNote=fals
   el('baBtns').innerHTML=btns.map(b=>`<button class="rbtn" style="border-color:${b.cls};color:${b.cls};" onclick="${b.fn}">${b.lbl}</button>`).join('');
   el('bigAlert').classList.add('show');}
 function closeAlert(){el('bigAlert').classList.remove('show');}
-function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.30 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.30',curPrice||2311,'Baseline v5.30 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
+function testAlert(){const c=getCtx();if(c&&c.state==='suspended')c.resume();playAlert('long');addLog('⚡ ทดสอบ Alert','var(--yellow)','var(--yellow)');sendNotif('ETH Cone v5.31 ⚡','ระบบพร้อม!');showAlert('info','⚡','TEST v5.31',curPrice||2311,'Baseline v5.31 Active\nTIMEOUT Analytics · Auto-Save · SW Keep-Alive','var(--cyan)',[{lbl:'✓ โอเค',cls:'var(--cyan)',fn:'closeAlert()'}]);}
 function toggleSound(){soundOn=!soundOn;el('btnSnd').textContent=soundOn?'🔊 เสียง: เปิด':'🔇 เสียง: ปิด';el('btnSnd').classList.toggle('on',soundOn);if(soundOn){const c=getCtx();if(c&&c.state==='suspended')c.resume();beep(660,.1);}}
 
 // FIX 10: CSV Export
@@ -2940,6 +2972,56 @@ async function resetBotAutoTrade() {
   }
   await _origResetBotAutoTrade();
 }
+
+
+// ══════════════════════════════════════════
+// BURST HUNTER (Engine B) — Dashboard
+// ══════════════════════════════════════════
+async function loadBurstTrades() {
+  try {
+    if (!VM_URL) return;
+    const r = await fetch(VM_URL + '/burst-trades', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    if (!d.ok) return;
+    const trades = d.trades || [];
+    const wins = trades.filter(t => t.pnl > 0).length;
+    const tpHits = trades.filter(t => t.result === 'TP').length;
+    const wr = trades.length ? Math.round(wins/trades.length*100) : 0;
+
+    document.getElementById('burstTotal').textContent = trades.length;
+    document.getElementById('burstWins').textContent = wins;
+    document.getElementById('burstWR').textContent = trades.length ? wr+'%' : '—';
+    document.getElementById('burstTP').textContent = tpHits;
+    const pnlEl = document.getElementById('burstPnl');
+    pnlEl.textContent = (d.totalPnl>=0?'+':'')+'$'+(d.totalPnl||0).toFixed(2);
+    pnlEl.style.color = d.totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+    const statusEl = document.getElementById('burstStatus');
+    statusEl.textContent = d.active ? '🔥 ACTIVE' : '⚪ รอ';
+    statusEl.style.color = d.active ? '#fb923c' : 'var(--muted)';
+
+    const tbody = document.getElementById('burstTableBody');
+    if (trades.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:10px;color:var(--muted);">ยังไม่มี burst trades</td></tr>';
+      return;
+    }
+    tbody.innerHTML = trades.slice().reverse().map(t => {
+      const dirColor = t.dir === 'long' ? 'var(--green)' : 'var(--red)';
+      const pnlColor = t.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+      const resIcon = t.result==='TP'?'🏆':t.result==='SL'?'🛑':'⏰';
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);">
+        <td style="padding:4px;">${t.num}</td>
+        <td style="color:${dirColor};">${t.dir.toUpperCase()}</td>
+        <td>$${t.entry.toFixed(1)}</td>
+        <td>$${t.exit.toFixed(1)}</td>
+        <td style="color:${pnlColor};">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td>
+        <td>${t.strength||'—'}</td>
+        <td>${resIcon} ${t.result}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { /* VM offline */ }
+}
+setInterval(loadBurstTrades, 30000);
+document.addEventListener('DOMContentLoaded', () => setTimeout(loadBurstTrades, 1000));
 
 // Load archive summary on start
 document.addEventListener('DOMContentLoaded', () => setTimeout(updateArchiveSummary, 500));

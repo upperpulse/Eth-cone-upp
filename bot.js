@@ -1,9 +1,9 @@
-// ETH Cone Bot v3.28
+// ETH Cone Bot v3.30
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.28'; // ← แก้ที่นี่ที่เดียว
-const DASH_VERSION = 'v5.29';
+const BOT_VERSION = 'v3.30'; // ← แก้ที่นี่ที่เดียว
+const DASH_VERSION = 'v5.31';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
@@ -17,7 +17,7 @@ const path      = require('path');
 const LOGIC_URL  = 'https://raw.githubusercontent.com/upperpulse/Eth-cone-upp/main/logic.js';
 const LOGIC_PATH = path.join(__dirname, 'logic.js');
 
-let calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSignal, calcTriggers, calcBestDirection;
+let calcMACD, calcRSI, calcOBV, calcATR, calcTrap, calcConfidence, calcSignal, calcTriggers, calcBestDirection, detectPreBurst;
 
 async function loadLogic() {
   try {
@@ -41,6 +41,7 @@ async function loadLogic() {
   calcSignal = logic.calcSignal;
   calcTriggers = logic.calcTriggers;
   calcBestDirection = logic.calcBestDirection;
+  detectPreBurst = logic.detectPreBurst;
   console.log(`✅ Logic v${logic.version} ready`);
 }
 
@@ -50,6 +51,14 @@ let AUTO_TRADE_TARGET_DYNAMIC = 10;
 let autoTradeEnabled = false; // ปรับได้จาก Dashboard
 const AUTO_DURATION_MS  = 7200000; // 2H
 const AUTO_SIZE         = 100;  // $100
+// ── ENGINE B — Burst Hunter (v3.30) ──
+const BURST_ENABLED     = true;
+const BURST_SIZE        = 100;       // $100 เท่า Engine A
+const BURST_TP_MULT     = 4.5;       // TP ใหญ่ (burst วิ่งแรง)
+const BURST_SL_MULT     = 0.5;       // SL แคบ (ไม่ทะลุ = ออกเร็ว)
+const BURST_DURATION_MS = 2700000;   // 45 นาที (สั้น)
+const BURST_STRENGTH_MIN = 80;       // strength ขั้นต่ำ
+const BURST_COOLDOWN_MS = 1800000;   // 30 นาที
 
 // ── Trade Mode Config ──────────────────────────
 const TRADE_MODE = 'paper';
@@ -65,9 +74,23 @@ const BINANCE_CONFIG = {
 const LEVERAGE = 3;          // เลเวอเรจ (global)
 
 // Micro-Momentum — เก็บราคา tick ล่าสุดเช็คก่อนเข้า
-let tickHistory = [];        // {price, ts} 12 ตัวล่าสุด (~2 นาที)
+let tickHistory = [];
+let pullbackPending = false;
+let pullbackDir = 'short';
+let pullbackStartPrice = 0;
+let pullbackStartTime = 0;
+// Engine B state
+let burstActive = false;
+let burstTrades = [];
+let burstLastEndTime = 0;
+const BURST_FILE = '/home/ubuntu/eth-bot/burst_trades.json';
+try { burstTrades = JSON.parse(fs.readFileSync(BURST_FILE,'utf8')); } catch { burstTrades = []; }
+function saveBurstTrades(){ try { fs.writeFileSync(BURST_FILE, JSON.stringify(burstTrades,null,2)); } catch(e){ console.log('burst save err',e.message); } }        // {price, ts} 12 ตัวล่าสุด (~2 นาที)
 const MICRO_LOOKBACK = 6;    // เช็ค 6 ticks (60 วินาที)
 const MICRO_THRESHOLD = 0.0012; // 0.12% — ถ้าราคาวิ่งสวนเกินนี้ → รอ
+const PULLBACK_ENABLED = true;     // v3.29 Entry Timing Refinement
+const PULLBACK_TARGET = 0.0010;    // 0.10% — รอราคาย่อกลับก่อนเข้า
+const PULLBACK_MAX_WAIT = 90000;   // รอ pullback ไม่เกิน 90 วินาที
 let GLOBAL_SL_AMOUNT    = 0;    // Paper Global SL ($) — 0 = ปิด
 let globalSLActive      = false;
 let dailyPnL            = 0;    // PnL รวมวันนี้
@@ -182,6 +205,26 @@ async function pollTelegram() {
 // ══════════════════════════════════════════════
 // WEEKLY SUMMARY — ส่งทุกอาทิตย์ตอน 09:00 ICT
 // ══════════════════════════════════════════════
+async function sendBurstSummary() {
+  try {
+    if (burstTrades.length === 0) {
+      await tg('🔥 <b>Burst Hunter Summary</b>\n\nยังไม่มี burst trades', false);
+      return;
+    }
+    const wins = burstTrades.filter(t => t.pnl > 0);
+    const total = burstTrades.reduce((a,t)=>a+t.pnl, 0);
+    const wr = (wins.length/burstTrades.length*100).toFixed(0);
+    const tpHits = burstTrades.filter(t=>t.result==='TP').length;
+    const msg = `🔥 <b>Burst Hunter Summary</b>\n\n` +
+      `📈 Total: ${burstTrades.length} trades\n` +
+      `✅ Wins: ${wins.length} | WR: ${wr}%\n` +
+      `🏆 TP Hits: ${tpHits}\n` +
+      `💰 Total PnL: ${total>=0?'+':''}$${total.toFixed(2)}\n` +
+      `\n(Engine B — แยกจาก Trend Trader)`;
+    await tg(msg, false);
+  } catch(e) { console.log('burst summary err', e.message); }
+}
+
 async function sendWeeklySummary() {
   try {
     const archivePath = '/home/ubuntu/eth-bot/auto_trades_archive.json';
@@ -342,6 +385,58 @@ async function getBinanceBalance() {
     headers: { 'X-MBX-APIKEY': BINANCE_CONFIG.apiKey }
   });
   return await r.json();
+}
+
+async function startBurstTrade(price, dir, atr, strength, detail) {
+  burstActive = true;
+  const entry = price;
+  const qty = (BURST_SIZE * LEVERAGE) / entry;
+  const endTime = Date.now() + BURST_DURATION_MS;
+  const tradeNum = burstTrades.length + 1;
+
+  let tp, sl;
+  if (dir === 'long') {
+    tp = entry + atr * BURST_TP_MULT;
+    sl = entry - atr * BURST_SL_MULT;
+  } else {
+    tp = entry - atr * BURST_TP_MULT;
+    sl = entry + atr * BURST_SL_MULT;
+  }
+
+  const f = (x) => x.toFixed(2);
+  await tg(`🔥 <b>BURST #${tradeNum} ENTRY</b>\n\n${dir==='long'?'🟢':'🔴'} ${dir.toUpperCase()}\n💰 Entry: $${f(entry)}\n🎯 TP: $${f(tp)}\n🛑 SL: $${f(sl)}\n⚡ Strength: ${strength}\n📊 ATR sq: ${detail.atrRatio} | range: ${detail.rangePct}%\n⏱ 45min`, true);
+
+  let maxP = 0, maxL = 0;
+  const monitor = setInterval(async () => {
+    try {
+      const p = await fetchPrice();
+      const pnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
+      if (pnl > maxP) maxP = pnl;
+      if (pnl < maxL) maxL = pnl;
+
+      let done = false, result = '';
+      if (dir === 'long') {
+        if (p >= tp) { result='TP'; done=true; }
+        else if (p <= sl) { result='SL'; done=true; }
+      } else {
+        if (p <= tp) { result='TP'; done=true; }
+        else if (p >= sl) { result='SL'; done=true; }
+      }
+      if (Date.now() > endTime && !done) { result='TIMEOUT'; done=true; }
+
+      if (done) {
+        clearInterval(monitor);
+        const finalPnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
+        const rec = { ts: Date.now(), num: tradeNum, dir, entry, exit: p, tp, sl, pnl: finalPnl, maxP, maxL, strength, result, engine: 'B' };
+        burstTrades.push(rec);
+        saveBurstTrades();
+        burstActive = false;
+        burstLastEndTime = Date.now();
+        const icon = result==='TP'?'🏆':result==='SL'?'🛑':'⏰';
+        await tg(`${icon} <b>BURST #${tradeNum} ${result}</b>\n\n${dir.toUpperCase()} $${f(entry)} → $${f(p)}\nPnL: ${finalPnl>=0?'+':''}$${finalPnl.toFixed(2)}\nMaxP: +$${maxP.toFixed(2)}`, true);
+      }
+    } catch(e) { console.log('burst monitor err', e.message); }
+  }, 5000);
 }
 
 async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features = {}) {
@@ -595,6 +690,39 @@ async function analyze() {
     tickHistory.push({ price, ts: now });
     if (tickHistory.length > 12) tickHistory.shift();
 
+    // ── Entry Timing Refinement (v3.29) ──
+    // เมื่อ signal ready → รอราคา pullback เล็กน้อยก่อนเข้า (entry ดีกว่า)
+    if (PULLBACK_ENABLED && best.best && best.best.entryReady && !pullbackPending && !autoTradeActive) {
+      const cooldownCheck = Date.now() > lastTradeEndTime + TRADE_COOLDOWN_MS;
+      if (cooldownCheck && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC) {
+        pullbackPending = true;
+        pullbackDir = best.best.entryDir;
+        pullbackStartPrice = price;
+        pullbackStartTime = Date.now();
+        console.log(`[PULLBACK] รอราคาย่อกลับก่อนเข้า ${pullbackDir} (signal $${price.toFixed(2)})`);
+      }
+    }
+
+    // เช็ค pullback: SHORT รอราคาเด้งขึ้น, LONG รอราคาย่อลง
+    if (pullbackPending) {
+      const waited = Date.now() - pullbackStartTime;
+      const moveFromSignal = (price - pullbackStartPrice) / pullbackStartPrice;
+      let pullbackHit = false;
+      if (pullbackDir === 'short' && moveFromSignal >= PULLBACK_TARGET) pullbackHit = true;  // ราคาเด้งขึ้น → SHORT entry ดีกว่า
+      if (pullbackDir === 'long'  && moveFromSignal <= -PULLBACK_TARGET) pullbackHit = true; // ราคาย่อลง → LONG entry ดีกว่า
+      if (pullbackHit) {
+        console.log(`[PULLBACK] ✅ ได้ราคาดีขึ้น เข้า ${pullbackDir} ที่ $${price.toFixed(2)}`);
+        pullbackPending = false;
+      } else if (waited > PULLBACK_MAX_WAIT) {
+        console.log(`[PULLBACK] หมดเวลา 90s — เข้าที่ราคาตลาด`);
+        pullbackPending = false; // หมดเวลา → เข้าปกติ
+      } else {
+        // ยังรอ pullback อยู่ — ไม่เข้า trade
+        lastSig = sig;
+        return;
+      }
+    }
+
     // เช็คว่าราคาวิ่งสวนทิศใน 60 วินาทีล่าสุดมั้ย
     let microOK = true;
     if (tickHistory.length >= MICRO_LOOKBACK) {
@@ -635,6 +763,19 @@ async function analyze() {
       lastConfAlert=true;
       await tg(`📊 <b>Confidence ≥ 80%!</b>\n\n🎯 ${macd1h.positive?'🟢 LONG':'🔴 SHORT'}\n📊 Conf: ${conf}% | Trig: ${trigs.score}/5\n💰 $${p} | RSI: ${rsi.toFixed(1)}\n😨 F&G: ${fg} ${fgL}\n\nระบบเริ่มตรวจ Trigger`,true);
     }
+
+    // ═══════════ ENGINE B — BURST HUNTER ═══════════
+    if (BURST_ENABLED && detectPreBurst && !burstActive) {
+      const burstCooldownOK = Date.now() > burstLastEndTime + BURST_COOLDOWN_MS;
+      if (burstCooldownOK) {
+        const burst = detectPreBurst(ethK, ethK15m);
+        if (burst.preBurst && burst.strength >= BURST_STRENGTH_MIN) {
+          console.log(`[BURST] ${burst.reason} (strength ${burst.strength})`);
+          await startBurstTrade(price, burst.direction, atr, burst.strength, burst.details);
+        }
+      }
+    }
+
     lastSig=sig;
   } catch(e){console.error('Analyze error:',e.message);}
 }
@@ -715,6 +856,11 @@ const server=http.createServer((req,res)=>{
   }else if(req.method==='GET'&&req.url==='/auto-trades'){
     res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
     res.end(JSON.stringify({ok:true,trades:autoTrades,count:autoTrades.length}));
+  }else if(req.method==='GET'&&req.url==='/burst-trades'){
+    res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+    const bwins = burstTrades.filter(t=>t.pnl>0).length;
+    const btotal = burstTrades.reduce((a,t)=>a+t.pnl,0);
+    res.end(JSON.stringify({ok:true,trades:burstTrades,count:burstTrades.length,active:burstActive,wins:bwins,totalPnl:btotal}));
   }else if(req.method==='POST'&&req.url==='/global-sl'){
     let body='';req.on('data',d=>body+=d);req.on('end',()=>{
       try{

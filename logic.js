@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '2.9';
+const ETH_LOGIC_VERSION = '3.0';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -393,6 +393,94 @@ function analyzeMultiTF(klines15m, klines1h, klines4h) {
   return { alignment, direction, score, reason, details: { tf15m: tf15m.dir, tf1h: tf1h.dir, tf4h: tf4h.dir, bullCount, bearCount } };
 }
 
+
+// ════════════════════════════════════════════════════════════
+// ENGINE B — PRE-BURST DETECTOR (v3.0)
+// ════════════════════════════════════════════════════════════
+// จับจังหวะ "ก่อน" ตลาด breakout — เข้า early ทำกำไรสูงช่วงสั้น
+// แยกอิสระจาก Engine A (trend trading)
+//
+// Output: { preBurst, direction, strength, reason, details }
+
+function detectPreBurst(klines1h, klines15m) {
+  const c1h = klines1h.map(k => parseFloat(k[4]));
+  const v1h = klines1h.map(k => parseFloat(k[5]));
+  const price = c1h[c1h.length - 1];
+
+  // ── 1. ATR Squeeze ──
+  const atrNow = calcATR(klines1h, 14);
+  const atrAvg = calcATR(klines1h, 50);
+  const atrRatio = atrNow / atrAvg;
+  const squeeze = atrRatio < 0.7;  // ATR หดตัว 30%+
+
+  // ── 2. Range Compression ──
+  const recent10 = c1h.slice(-10);
+  const high10 = Math.max(...recent10);
+  const low10 = Math.min(...recent10);
+  const rangePct = ((high10 - low10) / price) * 100;
+  const compressed = rangePct < 2.0;  // range แคบ < 2%
+
+  // ── 3. Volume Building ──
+  const volRecent = v1h.slice(-5).reduce((a,b)=>a+b,0) / 5;
+  const volAvg = v1h.slice(-20).reduce((a,b)=>a+b,0) / 20;
+  const volRatio = volRecent / volAvg;
+  const volBuilding = volRatio > 1.15;  // volume เพิ่ม 15%+
+
+  // ── 4. ทิศที่จะ breakout ──
+  const ema9 = calcEMA(c1h, 9);
+  const ema21 = calcEMA(c1h, 21);
+  const obv = calcOBV(klines1h);
+  
+  // ทิศจาก EMA + OBV alignment
+  let direction = 'neutral';
+  if (ema9 > ema21 && obv.slope > 0) direction = 'long';
+  else if (ema9 < ema21 && obv.slope < 0) direction = 'short';
+
+  // ── 5. 15m momentum confirm ──
+  let momentum15m = 'neutral';
+  if (klines15m && klines15m.length >= 20) {
+    const c15 = klines15m.map(k => parseFloat(k[4]));
+    const ema9_15 = calcEMA(c15, 9);
+    const ema21_15 = calcEMA(c15, 21);
+    momentum15m = ema9_15 > ema21_15 ? 'long' : 'short';
+  }
+
+  // ── Decision ──
+  // ต้อง squeeze + compressed + ทิศชัด + 15m ตรงกัน
+  const dirConfirm = direction !== 'neutral' && direction === momentum15m;
+  const preBurst = squeeze && compressed && dirConfirm;
+
+  // strength score
+  let strength = 0;
+  if (squeeze) strength += 30;
+  if (compressed) strength += 25;
+  if (volBuilding) strength += 25;
+  if (dirConfirm) strength += 20;
+
+  let reason = '';
+  if (preBurst) {
+    reason = `${direction.toUpperCase()} burst setup — ATR squeeze ${atrRatio.toFixed(2)}, range ${rangePct.toFixed(1)}%`;
+  } else if (squeeze && compressed) {
+    reason = 'Squeeze แต่ทิศไม่ชัด — รอ';
+  } else {
+    reason = 'ไม่มี squeeze';
+  }
+
+  return {
+    preBurst,
+    direction,
+    strength,
+    reason,
+    details: {
+      atrRatio: +atrRatio.toFixed(2),
+      rangePct: +rangePct.toFixed(2),
+      volRatio: +volRatio.toFixed(2),
+      squeeze, compressed, volBuilding, dirConfirm,
+      momentum15m
+    }
+  };
+}
+
 function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h = null, ethKlines15m = null) {
   const ec = ethKlines.map(k => parseFloat(k[4]));
   const bc = btcKlines.map(k => parseFloat(k[4]));
@@ -549,6 +637,7 @@ const ETH_LOGIC = {
   CONF_THRESHOLD,
   detectMarketRegime,
   analyzeMultiTF,
+  detectPreBurst,
   calcEMA,
   calcMACD,
   calcRSI,
