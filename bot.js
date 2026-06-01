@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.30
+// ETH Cone Bot v3.31
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.30'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.31'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.31';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -64,12 +64,15 @@ const BURST_COOLDOWN_MS = 1800000;   // 30 นาที
 const TRADE_MODE = 'paper';
 const SUMMARY_START_TS = 1779033600000; // ~16 พ.ค. — เริ่มนับ summary จาก R9  // 'paper' = จำลอง | 'live' = เทรดจริง Binance
 // Binance API config (ใช้ตอน TRADE_MODE='live' — ยังไม่เปิดใช้)
+// TRADE_MODE: 'paper' (จำลอง) | 'testnet' (Binance Testnet เงินปลอม) | 'live' (เงินจริง)
+const IS_TESTNET = TRADE_MODE === 'testnet';
+const IS_REAL_ORDER = TRADE_MODE === 'testnet' || TRADE_MODE === 'live';
 const BINANCE_CONFIG = {
-  apiKey:    process.env.BINANCE_API_KEY    || '',
-  apiSecret: process.env.BINANCE_API_SECRET || '',
-  baseURL:   'https://fapi.binance.com',
+  apiKey:    IS_TESTNET ? (process.env.BINANCE_TESTNET_KEY    || '') : (process.env.BINANCE_API_KEY    || ''),
+  apiSecret: IS_TESTNET ? (process.env.BINANCE_TESTNET_SECRET || '') : (process.env.BINANCE_API_SECRET || ''),
+  baseURL:   IS_TESTNET ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com',
   symbol:    'ETHUSDT',
-  testnet:   false
+  testnet:   IS_TESTNET
 };
 const LEVERAGE = 3;          // เลเวอเรจ (global)
 
@@ -359,11 +362,11 @@ function atrToCallbackRate(atr, entry) {
 
 // ส่ง order ไป Binance (active เมื่อ live เท่านั้น)
 async function placeBinanceOrder(order) {
-  if (TRADE_MODE !== 'live') {
+  if (!IS_REAL_ORDER) {
     console.log('[PAPER] buildOrder:', JSON.stringify(order));
     return { paper: true, order };
   }
-  // --- LIVE MODE (ยังไม่เปิดใช้ ต้องมี API key) ---
+  // --- TESTNET / LIVE MODE ---
   const ts = Date.now();
   const qs = Object.entries({...order, timestamp: ts})
     .map(([k,v]) => `${k}=${v}`).join('&');
@@ -377,7 +380,7 @@ async function placeBinanceOrder(order) {
 
 // ดึง balance (live เท่านั้น)
 async function getBinanceBalance() {
-  if (TRADE_MODE !== 'live') return { paper: true, balance: AUTO_SIZE };
+  if (!IS_REAL_ORDER) return { paper: true, balance: AUTO_SIZE };
   const ts = Date.now();
   const qs = `timestamp=${ts}`;
   const sig = signRequest(qs);
@@ -385,6 +388,59 @@ async function getBinanceBalance() {
     headers: { 'X-MBX-APIKEY': BINANCE_CONFIG.apiKey }
   });
   return await r.json();
+}
+
+
+// ตั้ง leverage บน Binance (testnet/live)
+async function setBinanceLeverage(lev) {
+  if (!IS_REAL_ORDER) return { paper: true, leverage: lev };
+  const ts = Date.now();
+  const qs = `symbol=${BINANCE_CONFIG.symbol}&leverage=${lev}&timestamp=${ts}`;
+  const sig = signRequest(qs);
+  const r = await fetch(`${BINANCE_CONFIG.baseURL}/fapi/v1/leverage?${qs}&signature=${sig}`, {
+    method: 'POST',
+    headers: { 'X-MBX-APIKEY': BINANCE_CONFIG.apiKey }
+  });
+  return await r.json();
+}
+
+// ดึง position ปัจจุบันจาก Binance
+async function getBinancePosition() {
+  if (!IS_REAL_ORDER) return { paper: true, positions: [] };
+  const ts = Date.now();
+  const qs = `timestamp=${ts}`;
+  const sig = signRequest(qs);
+  const r = await fetch(`${BINANCE_CONFIG.baseURL}/fapi/v2/positionRisk?${qs}&signature=${sig}`, {
+    headers: { 'X-MBX-APIKEY': BINANCE_CONFIG.apiKey }
+  });
+  const data = await r.json();
+  // กรองเฉพาะ ETHUSDT ที่มี position จริง
+  if (Array.isArray(data)) {
+    return data.filter(p => p.symbol === BINANCE_CONFIG.symbol && parseFloat(p.positionAmt) !== 0);
+  }
+  return data;
+}
+
+// ปิด position ทั้งหมด (emergency)
+async function closeBinanceAll() {
+  if (!IS_REAL_ORDER) return { paper: true, msg: 'paper mode — nothing to close' };
+  try {
+    const positions = await getBinancePosition();
+    if (!Array.isArray(positions) || positions.length === 0) {
+      return { ok: true, msg: 'no open positions' };
+    }
+    const results = [];
+    for (const pos of positions) {
+      const amt = parseFloat(pos.positionAmt);
+      const side = amt > 0 ? 'SELL' : 'BUY';  // ปิดด้วยฝั่งตรงข้าม
+      const order = buildOrder({ side, type: 'MARKET', quantity: Math.abs(amt), reduceOnly: true });
+      const res = await placeBinanceOrder(order);
+      results.push(res);
+    }
+    return { ok: true, closed: results.length, results };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 async function startBurstTrade(price, dir, atr, strength, detail) {
@@ -850,7 +906,7 @@ const server=http.createServer((req,res)=>{
     });
   }else if(req.method==='GET'&&req.url==='/health'){
     res.writeHead(200,{'Content-Type':'application/json'});
-    res.end(JSON.stringify({ok:true,tradeMode:TRADE_MODE,trade:!!tradeState,autoTrade:autoTradeActive,autoCount:autoTrades.length,autoTarget:AUTO_TRADE_TARGET_DYNAMIC,autoEnabled:autoTradeEnabled,sig:lastSig}));
+    res.end(JSON.stringify({ok:true,tradeMode:TRADE_MODE,isTestnet:IS_TESTNET,isRealOrder:IS_REAL_ORDER,trade:!!tradeState,autoTrade:autoTradeActive,autoCount:autoTrades.length,autoTarget:AUTO_TRADE_TARGET_DYNAMIC,autoEnabled:autoTradeEnabled,sig:lastSig}));
   }else if(req.method==='GET'&&req.url==='/auto-archive'){
     try{const d=fs.readFileSync('/home/ubuntu/eth-bot/auto_trades_archive.json','utf8');res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});res.end(d);}catch{res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});res.end('[]');}
   }else if(req.method==='GET'&&req.url==='/auto-trades'){
@@ -861,6 +917,21 @@ const server=http.createServer((req,res)=>{
     const bwins = burstTrades.filter(t=>t.pnl>0).length;
     const btotal = burstTrades.reduce((a,t)=>a+t.pnl,0);
     res.end(JSON.stringify({ok:true,trades:burstTrades,count:burstTrades.length,active:burstActive,wins:bwins,totalPnl:btotal}));
+  }else if(req.method==='GET'&&req.url==='/live-position'){
+    res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+    getBinancePosition().then(pos=>{
+      res.end(JSON.stringify({ok:true,mode:TRADE_MODE,testnet:IS_TESTNET,positions:pos}));
+    }).catch(e=>res.end(JSON.stringify({ok:false,error:e.message})));
+  }else if(req.method==='POST'&&req.url==='/live-close-all'){
+    res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+    closeBinanceAll().then(r=>{
+      res.end(JSON.stringify(r));
+    }).catch(e=>res.end(JSON.stringify({ok:false,error:e.message})));
+  }else if(req.method==='GET'&&req.url==='/live-balance'){
+    res.writeHead(200,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+    getBinanceBalance().then(b=>{
+      res.end(JSON.stringify({ok:true,mode:TRADE_MODE,balance:b}));
+    }).catch(e=>res.end(JSON.stringify({ok:false,error:e.message})));
   }else if(req.method==='POST'&&req.url==='/global-sl'){
     let body='';req.on('data',d=>body+=d);req.on('end',()=>{
       try{
