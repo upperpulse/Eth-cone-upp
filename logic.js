@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.0';
+const ETH_LOGIC_VERSION = '3.1';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -167,13 +167,22 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   const belowEMA  = options.belowEMA50 !== undefined ? options.belowEMA50 : true;
   const atrOK     = options.atrOK !== undefined ? options.atrOK : true;
   const momentumOK = options.momentumOK !== undefined ? options.momentumOK : true; // micro-momentum confirm
+  const regimeTrending = options.regimeTrending || false;  // v3.1: ตลาด trend ชัด
+  const sigDir = options.sigDir || 'long';                 // v3.1: ทิศที่กำลังเช็ค
 
   let sig = 'HOLD';
   let entryReady = false;
   let entryDir = 'long';
 
   // Block extreme RSI trap เมื่อ Conf สูงมาก
-  const extremeRSI = conf >= 90 && (rsi < 35 || rsi > 65);
+  // v3.1: ผ่อนเมื่อ TRENDING + ทิศตรงกับ trend (RSI ต่ำใน downtrend = ปกติ ไม่ใช่ trap)
+  // SHORT ตอน RSI ต่ำ + downtrend = OK | LONG ตอน RSI สูง + uptrend = OK
+  let extremeRSI = conf >= 90 && (rsi < 35 || rsi > 65);
+  if (regimeTrending) {
+    // ตลาด trend: SHORT+RSI ต่ำ หรือ LONG+RSI สูง = ตามเทรนด์ ไม่ block
+    if (sigDir === 'short' && rsi < 35 && rsi > 25) extremeRSI = false; // downtrend RSI ต่ำ OK (แต่ < 25 ยัง block)
+    if (sigDir === 'long'  && rsi > 65 && rsi < 75) extremeRSI = false; // uptrend RSI สูง OK (แต่ > 75 ยัง block)
+  }
   if (!confOK) {
     sig = `HOLD — Conf ต่ำ (${conf}% / ต้อง ${threshold}%)`;
   } else if (extremeRSI) {
@@ -601,19 +610,23 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     atrOK,
     threshold  // ส่งเข้า calcSignal
   };
-  const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong});
-  const sigShort = calcSignal(macdShort, obvShort, rsi, trap, confShort, {...opts, momentumOK: momentumShort});
+  const regimeTrending = regime && regime.regime === 'TRENDING';
+  const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong, regimeTrending, sigDir: 'long'});
+  const sigShort = calcSignal(macdShort, obvShort, rsi, trap, confShort, {...opts, momentumOK: momentumShort, regimeTrending, sigDir: 'short'});
 
   // เลือก direction ที่ดีกว่า
   let best = null;
   if (sigLong.entryReady && sigShort.entryReady) {
-    // ทั้งคู่พร้อม → เลือก Conf สูงกว่า
     best = confLong >= confShort ? sigLong : sigShort;
   } else if (sigLong.entryReady) {
     best = sigLong;
   } else if (sigShort.entryReady) {
     best = sigShort;
   }
+
+  // v3.1: displaySig — sig ที่ควรแสดง (ทิศ conf สูงกว่า) — decision อยู่ logic
+  const displaySig = confShort > confLong ? sigShort.sig : sigLong.sig;
+  const displayDir = confShort > confLong ? 'short' : 'long';
 
   return {
     macd, obv, rsi, atr, trap, btcMacd,
@@ -626,7 +639,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     bouncedUp, droppedDown, recentLow, recentHigh,
     confLong, confShort,
     sigLong, sigShort,
-    best,
+    best, displaySig, displayDir,
     fg
   };
 }

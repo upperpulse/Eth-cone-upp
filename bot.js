@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.33
+// ETH Cone Bot v3.35
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.33'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.35'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.32';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -789,9 +789,10 @@ async function analyze() {
     const btcBull = btcMacd.positive;
     const conf    = best.confLong >= best.confShort ? best.confLong : best.confShort;
     const trigs   = calcTriggers(macd1h, obv, btcBull, trap2, fg);
-    const sig     = best.best ? best.best.sig : best.sigLong.sig;
+    // v3.35: ใช้ displaySig จาก logic (decision อยู่ logic 100%)
+    const sig     = best.best ? best.best.sig : (best.displaySig || best.sigLong.sig);
     const entryReady = best.best ? best.best.entryReady : false;
-    const entryDir   = best.best ? best.best.entryDir : 'long';
+    const entryDir   = best.best ? best.best.entryDir : (best.displayDir || 'long');
     const emaDir  = best.aboveEMA50 ? '↑EMA' : '↓EMA';
 
     const now=Date.now(),p=price.toFixed(2);
