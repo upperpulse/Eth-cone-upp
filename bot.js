@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.32
+// ETH Cone Bot v3.33
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.32'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.33'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.32';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -75,6 +75,38 @@ const BINANCE_CONFIG = {
   testnet:   IS_TESTNET
 };
 const LEVERAGE = 3;          // เลเวอเรจ (global)
+// ── Fee & Slippage (v3.33) ──
+const TAKER_FEE = 0.0004;    // 0.04% Binance Futures taker fee
+const EST_SLIPPAGE = 0.0002; // 0.02% slippage โดยประมาณ (market order)
+// คำนวณ fee รวม (entry + exit) สำหรับ position
+function calcFees(entry, exit, qty) {
+  const entryFee = entry * qty * TAKER_FEE;
+  const exitFee = exit * qty * TAKER_FEE;
+  return entryFee + exitFee;
+}
+// ปรับ PnL ให้สมจริง (หัก fee + slippage) — ใช้ทั้ง paper และ live
+function netPnl(grossPnl, entry, exit, qty) {
+  const fees = calcFees(entry, exit, qty);
+  const slip = entry * qty * EST_SLIPPAGE;  // slippage ตอนเข้า
+  return grossPnl - fees - slip;
+}
+// ดึง realized PnL จริงจาก Binance (live mode)
+async function getBinanceRealizedPnl(sym, sinceTs) {
+  if (!IS_REAL_ORDER) return null;
+  try {
+    const ts = Date.now();
+    const qs = `symbol=${sym}&startTime=${sinceTs}&timestamp=${ts}`;
+    const sig = signRequest(qs);
+    const r = await fetch(`${BINANCE_CONFIG.baseURL}/fapi/v1/income?${qs}&signature=${sig}&incomeType=REALIZED_PNL`, {
+      headers: { 'X-MBX-APIKEY': BINANCE_CONFIG.apiKey }
+    });
+    const data = await r.json();
+    if (Array.isArray(data)) {
+      return data.reduce((sum, x) => sum + parseFloat(x.income || 0), 0);
+    }
+  } catch(e) { console.log('realized pnl err', e.message); }
+  return null;
+}
 
 // Micro-Momentum — เก็บราคา tick ล่าสุดเช็คก่อนเข้า
 let tickHistory = [];
@@ -276,6 +308,7 @@ async function sendWeeklySummary() {
       `Avg Loss: $${avgLoss.toFixed(2)}\n` +
       `Payoff Ratio: ${payoff}\n` +
       `Kelly: ${kelly}%\n` +
+      `Total Fees: -$${weekTrades.reduce((a,t)=>a+(t.fee||0),0).toFixed(2)}\n` +
       `\n` +
       `${verdict}`;
     await tg(msg, false);
@@ -484,8 +517,10 @@ async function startBurstTrade(price, dir, atr, strength, detail) {
 
       if (done) {
         clearInterval(monitor);
-        const finalPnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
-        const rec = { ts: Date.now(), num: tradeNum, dir, entry, exit: p, tp, sl, pnl: finalPnl, maxP, maxL, strength, result, engine: 'B' };
+        const grossPnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
+        const fee = calcFees(entry, p, qty);
+        const finalPnl = grossPnl - fee;
+        const rec = { ts: Date.now(), num: tradeNum, dir, entry, exit: p, tp, sl, pnl: finalPnl, grossPnl, fee, maxP, maxL, strength, result, engine: 'B' };
         burstTrades.push(rec);
         saveBurstTrades();
         burstActive = false;
@@ -580,8 +615,10 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
       lastConfAlert = false;
       const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
       const livePnl = dir === 'long' ? (p - entry) * qty : (entry - p) * qty;
-      const pnl = realizedPnl + livePnl * remainRatio;
-      const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'TIMEOUT', maxP, maxL, conf, partialClosed };
+      const grossPnl = realizedPnl + livePnl * remainRatio;
+      const fee = calcFees(entry, p, qty);
+      const pnl = grossPnl - fee;
+      const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, grossPnl, fee, result: partialClosed?'TP1':'TIMEOUT', maxP, maxL, conf, partialClosed };
       autoTrades.push(result); logMLData(result, _mlFeatures);
       saveAutoTrades();
       await tg(`⏰ <b>Auto Trade #${tradeNum} TIMEOUT</b>\n\n${dir.toUpperCase()} Entry: $${f(entry)} → $${f(p)}\nPnL: ${pnl>=0?'+':''}$${pnl.toFixed(2)}\nMax Profit: +$${maxP.toFixed(2)} | Max Loss: $${maxL.toFixed(2)}`, true);
@@ -601,18 +638,22 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
       if (p >= tp2) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
-        const pnl = realizedPnl + (p - entry) * qty * remainRatio;
-        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf, partialClosed };
+        const grossPnl = realizedPnl + (p - entry) * qty * remainRatio;
+        const fee = calcFees(entry, p, qty);
+        const pnl = grossPnl - fee;
+        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, grossPnl, fee, result: 'TP2', maxP, maxL, conf, partialClosed };
         autoTrades.push(result); logMLData(result, _mlFeatures); saveAutoTrades();
-        await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nLONG $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
+        await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nLONG $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)} (fee -$${fee.toFixed(2)})`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p <= sl) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
-        const pnl = realizedPnl + (p - entry) * qty * remainRatio;
-        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'SL', maxP, maxL, conf, partialClosed };
+        const grossPnl = realizedPnl + (p - entry) * qty * remainRatio;
+        const fee = calcFees(entry, p, qty);
+        const pnl = grossPnl - fee;
+        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, grossPnl, fee, result: partialClosed?'TP1':'SL', maxP, maxL, conf, partialClosed };
         autoTrades.push(result); logMLData(result, _mlFeatures); saveAutoTrades();
-        await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nLONG $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)}`, true);
+        await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nLONG $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)} (fee -$${fee.toFixed(2)})`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       }
     } else {
@@ -626,18 +667,22 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
       if (p <= tp2) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
-        const pnl = realizedPnl + (entry - p) * qty * remainRatio;
-        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: 'TP2', maxP, maxL, conf, partialClosed };
+        const grossPnl = realizedPnl + (entry - p) * qty * remainRatio;
+        const fee = calcFees(entry, p, qty);
+        const pnl = grossPnl - fee;
+        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, grossPnl, fee, result: 'TP2', maxP, maxL, conf, partialClosed };
         autoTrades.push(result); logMLData(result, _mlFeatures); saveAutoTrades();
-        await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nSHORT $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)}`, true);
+        await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nSHORT $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)} (fee -$${fee.toFixed(2)})`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p >= sl) {
         clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
-        const pnl = realizedPnl + (entry - p) * qty * remainRatio;
-        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, result: partialClosed?'TP1':'SL', maxP, maxL, conf, partialClosed };
+        const grossPnl = realizedPnl + (entry - p) * qty * remainRatio;
+        const fee = calcFees(entry, p, qty);
+        const pnl = grossPnl - fee;
+        const result = { num: tradeNum, sig, dir, entry, exit: p, tp1, tp2, sl, pnl, grossPnl, fee, result: partialClosed?'TP1':'SL', maxP, maxL, conf, partialClosed };
         autoTrades.push(result); logMLData(result, _mlFeatures); saveAutoTrades();
-        await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nSHORT $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)}`, true);
+        await tg(`🛑 <b>Auto Trade #${tradeNum} SL HIT</b>\n\nSHORT $${f(entry)} → $${f(p)}\n$${pnl.toFixed(2)} (fee -$${fee.toFixed(2)})`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       }
     }
