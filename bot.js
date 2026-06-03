@@ -3,7 +3,7 @@
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
 const BOT_VERSION = 'v3.32'; // ← แก้ที่นี่ที่เดียว
-const DASH_VERSION = 'v5.31';
+const DASH_VERSION = 'v5.32';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
