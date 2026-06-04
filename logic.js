@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.2';
+const ETH_LOGIC_VERSION = '3.3';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -442,26 +442,35 @@ function detectPreBurst(klines1h, klines15m) {
   const volBuilding = volRatio > 1.15;  // volume เพิ่ม 15%+
 
   // ── 4. ทิศที่จะ breakout ──
-  const ema9 = calcEMA(c1h, 9);
-  const ema21 = calcEMA(c1h, 21);
+  // v3.3: หาทิศแบบใช้ได้ตอน squeeze (ไม่พึ่ง EMA9/21 spread ที่หายตอนนิ่ง)
+  const ema50 = calcEMA(c1h, 50);
   const obv = calcOBV(klines1h);
-  
-  // ทิศจาก EMA + OBV alignment
-  let direction = 'neutral';
-  if (ema9 > ema21 && obv.slope > 0) direction = 'long';
-  else if (ema9 < ema21 && obv.slope < 0) direction = 'short';
 
-  // ── 5. 15m momentum confirm ──
+  // ทิศหลัก = EMA50 trend (ใหญ่ ไม่หายตอน squeeze) + position ในกรอบ
+  // ราคาอยู่ส่วนไหนของกรอบ 10 candle (0=ก้น, 1=ยอด)
+  const posInRange = (price - low10) / (high10 - low10 + 0.0001);
+
+  // breakout ทิศไหน: ดู EMA50 + OBV + position
+  // - ราคาเหนือ EMA50 + OBV บวก → จะ breakout ขึ้น (long)
+  // - ราคาใต้ EMA50 + OBV ลบ → จะ breakout ลง (short)
+  let direction = 'neutral';
+  const aboveEMA50 = price > ema50;
+  if (aboveEMA50 && obv.slope >= 0 && posInRange > 0.4) direction = 'long';
+  else if (!aboveEMA50 && obv.slope <= 0 && posInRange < 0.6) direction = 'short';
+
+  // ── 5. 15m EMA50 trend confirm (ไม่ใช่ EMA9/21 spread) ──
   let momentum15m = 'neutral';
-  if (klines15m && klines15m.length >= 20) {
+  if (klines15m && klines15m.length >= 50) {
     const c15 = klines15m.map(k => parseFloat(k[4]));
-    const ema9_15 = calcEMA(c15, 9);
-    const ema21_15 = calcEMA(c15, 21);
-    momentum15m = ema9_15 > ema21_15 ? 'long' : 'short';
+    const ema50_15 = calcEMA(c15, 50);
+    const price15 = c15[c15.length - 1];
+    momentum15m = price15 > ema50_15 ? 'long' : 'short';
+  } else {
+    momentum15m = direction; // ถ้า data ไม่พอ ใช้ทิศหลัก
   }
 
   // ── Decision ──
-  // ต้อง squeeze + compressed + ทิศชัด + 15m ตรงกัน
+  // squeeze + compressed + ทิศชัด + 15m ตรงกัน (ใช้ EMA50 ไม่ขัด squeeze แล้ว)
   const dirConfirm = direction !== 'neutral' && direction === momentum15m;
   const preBurst = squeeze && compressed && dirConfirm;
 

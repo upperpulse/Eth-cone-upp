@@ -300,6 +300,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
   <div class="tab" onclick="sw('multitf')">📈 MULTI-TF</div>
   <div class="tab" onclick="sw('history')">📋 HISTORY</div>
   <div class="tab" onclick="sw('analytics')">📊 ANALYTICS</div>
+  <div class="tab" onclick="sw('burst')">🔥 BURST</div>
   <div class="tab" onclick="sw('live')" id="tab-btn-live" style="display:none;">🔴 LIVE</div>
 </div>
 
@@ -886,6 +887,36 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:1px;backgro
 </div>
 
 
+<!-- BURST HUNTER TAB (Engine B) -->
+<div class="tab-content" id="tab-burst" style="display:none;">
+  <div class="card" style="border-color:rgba(251,146,60,.5);margin-bottom:10px;">
+    <div class="ctitle" style="color:#fb923c;">🔥 BURST HUNTER — Engine B</div>
+    <div style="font-size:9px;color:var(--muted);margin-bottom:8px;line-height:1.6;">
+      จับจังหวะก่อน breakout — ATR Squeeze + Volume Building<br>
+      TP ใหญ่ (ATR×4.5) · SL แคบ (ATR×0.5) · 45 นาที · แยกจาก Trend Trader
+    </div>
+    <div class="angrid">
+      <div class="anbox"><div class="anlbl">TOTAL</div><div class="anval" id="burstTotal" style="color:#fb923c;">—</div></div>
+      <div class="anbox"><div class="anlbl">WIN</div><div class="anval" id="burstWins" style="color:var(--green);">—</div></div>
+      <div class="anbox"><div class="anlbl">WIN RATE</div><div class="anval" id="burstWR" style="color:var(--yellow);">—</div></div>
+      <div class="anbox"><div class="anlbl">TP HITS</div><div class="anval" id="burstTP" style="color:var(--green);">—</div></div>
+      <div class="anbox"><div class="anlbl">TOTAL PnL</div><div class="anval" id="burstPnl">—</div></div>
+      <div class="anbox"><div class="anlbl">STATUS</div><div class="anval" id="burstStatus" style="font-size:11px;">—</div></div>
+    </div>
+  </div>
+  <div class="card yw">
+    <div class="ctitle" style="color:#fb923c;">🔥 BURST TRADE LOG</div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;font-size:9px;font-family:'Share Tech Mono',monospace;border-collapse:collapse;" id="burstTable">
+        <thead><tr style="color:var(--muted);border-bottom:1px solid rgba(255,255,255,.1);">
+          <th style="padding:4px;text-align:left;">#</th><th>DIR</th><th>ENTRY</th><th>EXIT</th><th>PnL</th><th>STR</th><th>RESULT</th>
+        </tr></thead>
+        <tbody id="burstTableBody"><tr><td colspan="7" style="text-align:center;padding:10px;color:var(--muted);">ยังไม่มี burst trades</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- LIVE TRADING TAB -->
 <div class="tab-content" id="tab-live" style="display:none;">
   <div class="card" style="border-color:rgba(239,68,68,.5);margin-bottom:10px;">
@@ -1267,7 +1298,7 @@ function setTV(id,val,color='var(--text)'){const e=el(id);if(e){e.textContent=va
 
 // Tabs
 function sw(t){
-  const ids=['main','trigger','alerts','trade','multitf','history','analytics','live'];
+  const ids=['main','trigger','alerts','trade','multitf','history','analytics','burst','live'];
   document.querySelectorAll('.tab').forEach((e)=>{
     const tabFor = e.getAttribute('onclick');
     if(tabFor) e.classList.toggle('active', tabFor.includes("'"+t+"'"));
@@ -1280,6 +1311,7 @@ function sw(t){
   if(t==='multitf')fetchAllTF();
   if(t==='trade'){calcHoldSuggest();updateRiskDashboard();fetchSignalQuality();}
   if(t==='live'){fetchLivePosition();}
+  if(t==='burst'){loadBurstTrades();}
 }
 
 // Log
@@ -2444,7 +2476,7 @@ function clearHistory(){if(confirm('ลบประวัติทั้งห�
 
 // Analytics
 async function renderAnalytics(){
-  // v5.32: ดึง auto trades archive จาก VM (ทุกรอบสะสม) แทน manual log
+  // v5.33: ดึง auto trades archive จาก VM (ทุกรอบสะสม) แทน manual log
   let log = [];
   try {
     if (VM_URL) {
@@ -2667,7 +2699,7 @@ async function fetchAutoTrades() {
     const d = await r.json();
     autoTradesData = d.trades || [];
     renderAutoHistory(autoTradesData);
-    // v5.32: BOT STATS ใช้ archive (ทุกรอบสะสม) ไม่ใช่รอบปัจจุบัน
+    // v5.33: BOT STATS ใช้ archive (ทุกรอบสะสม) ไม่ใช่รอบปัจจุบัน
     try {
       const ra = await fetch(VM_URL + '/auto-archive', { headers: { 'ngrok-skip-browser-warning': 'true' } });
       const da = await ra.json();
@@ -2963,6 +2995,41 @@ async function resetBotAutoTrade() {
   }
   await _origResetBotAutoTrade();
 }
+
+
+// ── BURST HUNTER (Engine B) Dashboard ──
+async function loadBurstTrades() {
+  try {
+    if (!VM_URL) return;
+    const r = await fetch(VM_URL + '/burst-trades', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+    const d = await r.json();
+    if (!d.ok) return;
+    const trades = d.trades || [];
+    const wins = trades.filter(t => t.pnl > 0).length;
+    const tpHits = trades.filter(t => t.result === 'TP').length;
+    const wr = trades.length ? Math.round(wins/trades.length*100) : 0;
+    const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+    set('burstTotal', trades.length);
+    set('burstWins', wins);
+    set('burstWR', trades.length ? wr+'%' : '—');
+    set('burstTP', tpHits);
+    const pnlEl = document.getElementById('burstPnl');
+    if(pnlEl){ pnlEl.textContent = (d.totalPnl>=0?'+':'')+'$'+(d.totalPnl||0).toFixed(2); pnlEl.style.color = d.totalPnl >= 0 ? 'var(--green)' : 'var(--red)'; }
+    const statusEl = document.getElementById('burstStatus');
+    if(statusEl){ statusEl.textContent = d.active ? '🔥 ACTIVE' : '⚪ รอ'; statusEl.style.color = d.active ? '#fb923c' : 'var(--muted)'; }
+    const tbody = document.getElementById('burstTableBody');
+    if(!tbody) return;
+    if (trades.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:10px;color:var(--muted);">ยังไม่มี burst trades</td></tr>'; return; }
+    tbody.innerHTML = trades.slice().reverse().map(t => {
+      const dc = t.dir === 'long' ? 'var(--green)' : 'var(--red)';
+      const pc = t.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+      const ic = t.result==='TP'?'🏆':t.result==='SL'?'🛑':'⏰';
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,.05);"><td style="padding:4px;">${t.num}</td><td style="color:${dc};">${t.dir.toUpperCase()}</td><td>$${t.entry.toFixed(1)}</td><td>$${t.exit.toFixed(1)}</td><td style="color:${pc};">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td><td>${t.strength||'—'}</td><td>${ic} ${t.result}</td></tr>`;
+    }).join('');
+  } catch(e) {}
+}
+setInterval(loadBurstTrades, 30000);
+document.addEventListener('DOMContentLoaded', () => setTimeout(loadBurstTrades, 1200));
 
 // Load archive summary on start
 document.addEventListener('DOMContentLoaded', () => setTimeout(updateArchiveSummary, 500));
