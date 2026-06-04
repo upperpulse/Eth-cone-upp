@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.1';
+const ETH_LOGIC_VERSION = '3.2';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -161,15 +161,21 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap, extra = {}) {
 function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   const threshold = options.threshold !== undefined ? options.threshold : 80;
   const confOK    = conf >= threshold;
-  const rsiOB     = rsi > 62;
+  const regimeTrending = options.regimeTrending || false;  // v3.1: ตลาด trend ชัด
+  const sigDir = options.sigDir || 'long';                 // v3.1: ทิศที่เช็ค
+  // v3.2: RSI Adaptive ตาม regime
+  // TRENDING → ผ่อน (ตามเทรนด์) | RANGING → เข้ม (กันเด้ง) | VOLATILE → เข้มสุด
+  let rsiShortMin = 35, rsiLongMax = 62;  // default (RANGING-like)
+  if (regimeTrending) {
+    rsiShortMin = 25;   // downtrend แรง RSI ต่ำ = ปกติ → SHORT ได้
+    rsiLongMax = 75;    // uptrend แรง RSI สูง = ปกติ → LONG ได้
+  }
+  const rsiOB     = rsi > rsiLongMax;
   const goOnly    = options.goOnly || false;     // true = GO cross เท่านั้น
   const aboveEMA  = options.aboveEMA50 !== undefined ? options.aboveEMA50 : true;
   const belowEMA  = options.belowEMA50 !== undefined ? options.belowEMA50 : true;
   const atrOK     = options.atrOK !== undefined ? options.atrOK : true;
   const momentumOK = options.momentumOK !== undefined ? options.momentumOK : true; // micro-momentum confirm
-  const regimeTrending = options.regimeTrending || false;  // v3.1: ตลาด trend ชัด
-  const sigDir = options.sigDir || 'long';                 // v3.1: ทิศที่กำลังเช็ค
-
   let sig = 'HOLD';
   let entryReady = false;
   let entryDir = 'long';
@@ -217,7 +223,7 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
     sig = 'HOLD — รอ OBV+ หรือ Slope+';
 
   // ── SHORT conditions ─────────────────────
-  } else if (!macd1h.positive && (!obv.positive || obv.slope < 0) && !rsiOB && rsi > 35 && belowEMA) {
+  } else if (!macd1h.positive && (!obv.positive || obv.slope < 0) && !rsiOB && rsi > rsiShortMin && belowEMA) {
     // SHORT: OBV negative หรือ slope ลง ก็พอ
     if (macd1h.bearCross) {
       sig = 'GO SHORT';
@@ -231,8 +237,8 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
     } else {
       sig = 'HOLD — รอ MACD แข็งแรงขึ้น (SHORT)';
     }
-  } else if (!macd1h.positive && (!obv.positive || obv.slope < 0) && rsi <= 35) {
-    sig = 'HOLD — RSI Oversold (SHORT Risk)';
+  } else if (!macd1h.positive && (!obv.positive || obv.slope < 0) && rsi <= rsiShortMin) {
+    sig = `HOLD — RSI Oversold ${rsi.toFixed(0)} < ${rsiShortMin} (SHORT Risk)`;
   } else if (!macd1h.positive && belowEMA === false) {
     sig = 'HOLD — ราคาสูงกว่า EMA50 (SHORT Risk)';
   } else if (!macd1h.positive && obv.positive && obv.slope >= 0) {
