@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.38
+// ETH Cone Bot v3.39
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.38'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.39'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.33';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -593,23 +593,29 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
     // ── Trailing SL ───────────────────────
     const tp1dist = Math.abs(tp1 - entry);
     const tp1pnl  = tp1dist * qty;
+    const slBefore = sl;          // v3.39: track เพื่อแจ้งเมื่อขยับ
+    let trailReason = '';
     if (maxP >= tp1pnl * TRAIL_BREAKEVEN) {
-      if (dir === 'long'  && sl < entry) { sl = entry; }
-      if (dir === 'short' && sl > entry) { sl = entry; }
+      if (dir === 'long'  && sl < entry) { sl = entry; trailReason = 'Breakeven'; }
+      if (dir === 'short' && sl > entry) { sl = entry; trailReason = 'Breakeven'; }
     }
     if (maxP >= tp1pnl * TRAIL_LOCK) {
       const lockPrice = dir === 'long' ? entry + tp1dist * 0.4 : entry - tp1dist * 0.4;
-      if (dir === 'long'  && sl < lockPrice) { sl = lockPrice; }
-      if (dir === 'short' && sl > lockPrice) { sl = lockPrice; }
+      if (dir === 'long'  && sl < lockPrice) { sl = lockPrice; trailReason = 'Lock TP1×40%'; }
+      if (dir === 'short' && sl > lockPrice) { sl = lockPrice; trailReason = 'Lock TP1×40%'; }
     }
     // ── v3.32 Progressive Profit Lock ──
-    // เมื่อ maxP > $1 → ล็อก SL ที่ 50% ของกำไรสูงสุด (กันกำไรหลุดแบบ #4 R16)
     if (maxP >= TRAIL_PROFIT_MIN) {
-      const lockPnl = maxP * TRAIL_PROFIT_LOCK;       // ล็อกครึ่งของ maxP
-      const lockDist = lockPnl / qty;                  // แปลงกลับเป็นระยะราคา
+      const lockPnl = maxP * TRAIL_PROFIT_LOCK;
+      const lockDist = lockPnl / qty;
       const profitLockPrice = dir === 'long' ? entry + lockDist : entry - lockDist;
-      if (dir === 'long'  && sl < profitLockPrice) { sl = profitLockPrice; }
-      if (dir === 'short' && sl > profitLockPrice) { sl = profitLockPrice; }
+      if (dir === 'long'  && sl < profitLockPrice) { sl = profitLockPrice; trailReason = `Profit Lock ($${lockPnl.toFixed(2)})`; }
+      if (dir === 'short' && sl > profitLockPrice) { sl = profitLockPrice; trailReason = `Profit Lock ($${lockPnl.toFixed(2)})`; }
+    }
+    // v3.39: แจ้ง Telegram เมื่อ SL ขยับ (ล็อกกำไร)
+    if (trailReason && Math.abs(sl - slBefore) > 0.01) {
+      const lockedPnl = dir === 'long' ? (sl - entry) * qty : (entry - sl) * qty;
+      await tg(`🔒 <b>Trailing SL #${tradeNum}</b>\n\n${dir.toUpperCase()} ${trailReason}\nSL: $${slBefore.toFixed(2)} → $${sl.toFixed(2)}\n${lockedPnl >= 0 ? '🟢 ล็อกกำไร +$'+lockedPnl.toFixed(2) : '⚪ Breakeven'}\nmaxP: +$${maxP.toFixed(2)}`, true);
     }
 
     // Check timeout
