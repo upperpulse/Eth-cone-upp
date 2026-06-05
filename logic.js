@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.3';
+const ETH_LOGIC_VERSION = '3.5';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -469,25 +469,87 @@ function detectPreBurst(klines1h, klines15m) {
     momentum15m = direction; // ถ้า data ไม่พอ ใช้ทิศหลัก
   }
 
-  // ── Decision ──
-  // squeeze + compressed + ทิศชัด + 15m ตรงกัน (ใช้ EMA50 ไม่ขัด squeeze แล้ว)
+  // ── Decision: Squeeze Burst ──
   const dirConfirm = direction !== 'neutral' && direction === momentum15m;
-  const preBurst = squeeze && compressed && dirConfirm;
+  const squeezeBurst = squeeze && compressed && dirConfirm;
+
+  // ── v3.4: REVERSAL BURST — จับก้นเด้ง (capitulation reversal) ──
+  // ราคาดิ่งแรงเกิน → oversold สุด → เด้งกลับ (จับ #6,7,8 pattern)
+  const rsi14 = calcRSI(c1h, 14);
+  // ดิ่ง/พุ่งกี่ % ใน 5 candle ล่าสุด (วัดจาก peak→trough — จับ capitulation)
+  const recent5 = c1h.slice(-5);
+  const peak5 = Math.max(...recent5);
+  const trough5 = Math.min(...recent5);
+  const drop5 = (peak5 - trough5) / peak5;       // ช่วงดิ่งสูงสุด
+  const pump5 = (peak5 - trough5) / trough5;      // ช่วงพุ่งสูงสุด
+  // ราคาเด้งจากก้นแล้วหรือยัง (price > trough = เริ่มเด้ง)
+  const bouncedFromLow = (price - trough5) / trough5 > 0.003;  // เด้ง > 0.3% จากก้น
+  const droppedFromHigh = (peak5 - price) / peak5 > 0.003;     // ลง > 0.3% จากยอด
+
+  // Reversal LONG: ดิ่งแรง >2.5% + RSI<30 + เด้งจากก้นแล้ว → จับเด้งขึ้น
+  const revLong = drop5 > 0.020 && rsi14 < 35 && bouncedFromLow;
+  // Reversal SHORT: พุ่งแรง >2.5% + RSI>70 + ลงจากยอดแล้ว → จับเด้งลง
+  const revShort = pump5 > 0.020 && rsi14 > 65 && droppedFromHigh;
+  const drop3 = drop5, pump3 = pump5;  // alias สำหรับ strength/reason
+  const reversalBurst = revLong || revShort;
+  const revDir = revLong ? 'long' : (revShort ? 'short' : 'neutral');
+
+  // ── v3.5: LIQUIDITY SWEEP — ทะลุ low/high (กิน stop) แล้วกลับทันที ──
+  // ราคาทะลุ low 20 candle แล้วเด้งกลับเหนือ = sweep liquidity → LONG
+  // ราคาทะลุ high 20 candle แล้วร่วงกลับใต้ = sweep → SHORT
+  const recent20 = c1h.slice(-21, -1);  // 20 candle ก่อนหน้า (ไม่รวมปัจจุบัน)
+  const prevLow20 = Math.min(...recent20);
+  const prevHigh20 = Math.max(...recent20);
+  const candleLow = parseFloat(klines1h[klines1h.length-1][3]);   // low ของ candle ปัจจุบัน
+  const candleHigh = parseFloat(klines1h[klines1h.length-1][2]);  // high ของ candle ปัจจุบัน
+
+  // Sweep LONG: ไส้เทียนทะลุ low เดิม (กิน stop) แต่ราคาปิดกลับเหนือ low เดิม
+  const sweptLow = candleLow < prevLow20 && price > prevLow20;
+  // Sweep SHORT: ไส้เทียนทะลุ high เดิม แต่ราคาปิดกลับใต้ high เดิม
+  const sweptHigh = candleHigh > prevHigh20 && price < prevHigh20;
+  const sweepLong = sweptLow && obv.slope > 0;    // มีแรงซื้อยืนยัน
+  const sweepShort = sweptHigh && obv.slope < 0;     // มีแรงขายยืนยัน
+  const liquiditySweep = sweepLong || sweepShort;
+  const sweepDir = sweepLong ? 'long' : (sweepShort ? 'short' : 'neutral');
+
+  // รวม 3 โหมด
+  const preBurst = squeezeBurst || reversalBurst || liquiditySweep;
+  // priority: sweep > reversal > squeeze (sweep เฉพาะเจาะจงสุด)
+  if (liquiditySweep) direction = sweepDir;
+  else if (reversalBurst) direction = revDir;
 
   // strength score
   let strength = 0;
-  if (squeeze) strength += 30;
-  if (compressed) strength += 25;
-  if (volBuilding) strength += 25;
-  if (dirConfirm) strength += 20;
+  let burstType = 'none';
+  if (squeezeBurst) {
+    if (squeeze) strength += 30;
+    if (compressed) strength += 25;
+    if (volBuilding) strength += 25;
+    if (dirConfirm) strength += 20;
+    burstType = 'squeeze';
+  } else if (liquiditySweep) {
+    strength += 55;                          // sweep = เฉพาะเจาะจง base สูง
+    if (volRatio > 1.3) strength += 25;      // volume spike ตอน sweep = ยืนยัน
+    if (rsi14 < 35 || rsi14 > 65) strength += 20;  // RSI สุดขั้ว = มั่นใจกลับ
+    burstType = 'sweep';
+  } else if (reversalBurst) {
+    strength += 50;
+    if (Math.abs(drop3 || pump3) > 0.035) strength += 20;
+    if (volRatio > 1.3) strength += 20;
+    burstType = 'reversal';
+  }
 
   let reason = '';
-  if (preBurst) {
-    reason = `${direction.toUpperCase()} burst setup — ATR squeeze ${atrRatio.toFixed(2)}, range ${rangePct.toFixed(1)}%`;
+  if (squeezeBurst) {
+    reason = `${direction.toUpperCase()} squeeze burst — ATR ${atrRatio.toFixed(2)}, range ${rangePct.toFixed(1)}%`;
+  } else if (liquiditySweep) {
+    reason = `${direction.toUpperCase()} liquidity sweep — ${sweepLong?'กิน low เด้งกลับ':'กิน high ร่วงกลับ'} RSI ${rsi14.toFixed(0)}`;
+  } else if (reversalBurst) {
+    reason = `${direction.toUpperCase()} reversal burst — ${revLong?'ดิ่ง':'พุ่ง'} ${((revLong?drop3:pump3)*100).toFixed(1)}% RSI ${rsi14.toFixed(0)}`;
   } else if (squeeze && compressed) {
     reason = 'Squeeze แต่ทิศไม่ชัด — รอ';
   } else {
-    reason = 'ไม่มี squeeze';
+    reason = 'ไม่มี setup';
   }
 
   return {
@@ -500,7 +562,8 @@ function detectPreBurst(klines1h, klines15m) {
       rangePct: +rangePct.toFixed(2),
       volRatio: +volRatio.toFixed(2),
       squeeze, compressed, volBuilding, dirConfirm,
-      momentum15m
+      momentum15m, burstType, rsi14: +rsi14.toFixed(0),
+      drop3: +(drop3*100).toFixed(1), pump3: +(pump3*100).toFixed(1)
     }
   };
 }

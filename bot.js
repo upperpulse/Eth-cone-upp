@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.37
+// ETH Cone Bot v3.38
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.37'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.38'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.33';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -116,6 +116,7 @@ let pullbackStartPrice = 0;
 let pullbackStartTime = 0;
 // Engine B state
 let burstActive = false;
+let burstDir = null;        // ทิศ Engine B ปัจจุบัน (กัน conflict)
 let burstTrades = [];
 let burstLastEndTime = 0;
 const BURST_FILE = '/home/ubuntu/eth-bot/burst_trades.json';
@@ -148,6 +149,7 @@ let fgCache = { val: 50, ts: 0 };
 let tradeState = null;
 let tradeInterval = null;
 let autoTradeActive = false;
+let autoTradeDir = null;    // ทิศ Engine A ปัจจุบัน (กัน conflict)
 let lastTradeEndTime = 0; // cooldown หลัง trade จบ // Auto Paper Trade running
 let autoTrades = [];         // ผลทุกรอบ
 
@@ -480,6 +482,7 @@ async function closeBinanceAll() {
 
 async function startBurstTrade(price, dir, atr, strength, detail) {
   burstActive = true;
+  burstDir = dir;  // v3.38: track ทิศ
   const entry = price;
   const qty = (BURST_SIZE * LEVERAGE) / entry;
   const endTime = Date.now() + BURST_DURATION_MS;
@@ -524,6 +527,7 @@ async function startBurstTrade(price, dir, atr, strength, detail) {
         burstTrades.push(rec);
         saveBurstTrades();
         burstActive = false;
+        burstDir = null;
         burstLastEndTime = Date.now();
         const icon = result==='TP'?'🏆':result==='SL'?'🛑':'⏰';
         await tg(`${icon} <b>BURST #${tradeNum} ${result}</b>\n\n${dir.toUpperCase()} $${f(entry)} → $${f(p)}\nPnL: ${finalPnl>=0?'+':''}$${finalPnl.toFixed(2)}\nMaxP: +$${maxP.toFixed(2)}`, true);
@@ -535,6 +539,7 @@ async function startBurstTrade(price, dir, atr, strength, detail) {
 async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features = {}) {
   // autoTradeActive ถูก set ก่อน call แล้ว ไม่ต้อง check ซ้ำ
   autoTradeActive = true;
+  autoTradeDir = dir;  // v3.38: track ทิศ
 
   const entry = price;
   const qty   = (AUTO_SIZE * LEVERAGE) / entry;
@@ -636,7 +641,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
         await tg(`🎯 <b>Auto #${tradeNum} TP1 HIT</b> $${f(p)}\n💰 ปิด 50% → +$${partialPnl.toFixed(2)}\nที่เหลือ 50% รอ TP2`, true);
       }
       if (p >= tp2) {
-        clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
+        clearInterval(monitor); autoTradeActive = false; autoTradeDir = null; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
         const grossPnl = realizedPnl + (p - entry) * qty * remainRatio;
         const fee = calcFees(entry, p, qty);
@@ -646,7 +651,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nLONG $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)} (fee -$${fee.toFixed(2)})`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p <= sl) {
-        clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
+        clearInterval(monitor); autoTradeActive = false; autoTradeDir = null; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
         const grossPnl = realizedPnl + (p - entry) * qty * remainRatio;
         const fee = calcFees(entry, p, qty);
@@ -665,7 +670,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
         await tg(`🎯 <b>Auto #${tradeNum} TP1 HIT</b> $${f(p)}\n💰 ปิด 50% → +$${partialPnl.toFixed(2)}\nที่เหลือ 50% รอ TP2`, true);
       }
       if (p <= tp2) {
-        clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
+        clearInterval(monitor); autoTradeActive = false; autoTradeDir = null; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
         const grossPnl = realizedPnl + (entry - p) * qty * remainRatio;
         const fee = calcFees(entry, p, qty);
@@ -675,7 +680,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
         await tg(`🏆 <b>Auto Trade #${tradeNum} TP2 WIN!</b>\n\nSHORT $${f(entry)} → $${f(p)}\n+$${pnl.toFixed(2)} (fee -$${fee.toFixed(2)})`, true);
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       } else if (p >= sl) {
-        clearInterval(monitor); autoTradeActive = false; lastTradeEndTime = Date.now(); lastConfAlert = false;
+        clearInterval(monitor); autoTradeActive = false; autoTradeDir = null; lastTradeEndTime = Date.now(); lastConfAlert = false;
         const remainRatio = partialClosed ? (1 - PARTIAL_TP_RATIO) : 1;
         const grossPnl = realizedPnl + (entry - p) * qty * remainRatio;
         const fee = calcFees(entry, p, qty);
@@ -850,7 +855,7 @@ async function analyze() {
 
     if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK && !microOK) {
       console.log(`[MICRO-MOMENTUM] รอจังหวะ — ราคากำลังสวน ${entryDir}`);
-    } else if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK && microOK) {
+    } else if(entryReady && !autoTradeActive && autoTradeEnabled && autoTrades.length < AUTO_TRADE_TARGET_DYNAMIC && cooldownOK && microOK && !(burstActive && burstDir && burstDir !== entryDir)) {
       autoTradeActive = true;
       lastConfAlert = true;
       await startAutoPaperTrade(sig, price, entryDir, atr, conf, trigs.score, {
@@ -883,8 +888,14 @@ async function analyze() {
       if (burstCooldownOK) {
         const burst = detectPreBurst(ethK, ethK15m);
         if (burst.preBurst && burst.strength >= BURST_STRENGTH_MIN) {
-          console.log(`[BURST] ${burst.reason} (strength ${burst.strength})`);
-          await startBurstTrade(price, burst.direction, atr, burst.strength, burst.details);
+          // v3.38 Anti-Conflict: ห้าม B เข้าทิศตรงข้าม A ที่ถืออยู่
+          const conflict = autoTradeActive && autoTradeDir && autoTradeDir !== burst.direction;
+          if (conflict) {
+            console.log(`[BURST] ⛔ ข้าม — ทิศตรงข้าม Engine A (A:${autoTradeDir} B:${burst.direction})`);
+          } else {
+            console.log(`[BURST] ${burst.reason} (strength ${burst.strength})`);
+            await startBurstTrade(price, burst.direction, atr, burst.strength, burst.details);
+          }
         }
       }
     }
