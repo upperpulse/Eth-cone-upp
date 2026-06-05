@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.5';
+const ETH_LOGIC_VERSION = '3.6';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -162,6 +162,8 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   const threshold = options.threshold !== undefined ? options.threshold : 80;
   const confOK    = conf >= threshold;
   const regimeTrending = options.regimeTrending || false;  // v3.1: ตลาด trend ชัด
+  const shortExhausted = options.shortExhausted || false;  // v3.6
+  const longExhausted = options.longExhausted || false;
   const sigDir = options.sigDir || 'long';                 // v3.1: ทิศที่เช็ค
   // v3.2: RSI Adaptive ตาม regime
   // TRENDING → ผ่อน (ตามเทรนด์) | RANGING → เข้ม (กันเด้ง) | VOLATILE → เข้มสุด
@@ -189,7 +191,11 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
     if (sigDir === 'short' && rsi < 35 && rsi > 25) extremeRSI = false; // downtrend RSI ต่ำ OK (แต่ < 25 ยัง block)
     if (sigDir === 'long'  && rsi > 65 && rsi < 75) extremeRSI = false; // uptrend RSI สูง OK (แต่ > 75 ยัง block)
   }
-  if (!confOK) {
+  if (sigDir === 'short' && shortExhausted) {
+    sig = 'HOLD — Over-extended (ดิ่งเร็ว+RSI ต่ำ — เสี่ยงเด้ง)';
+  } else if (sigDir === 'long' && longExhausted) {
+    sig = 'HOLD — Over-extended (พุ่งเร็ว+RSI สูง — เสี่ยงย่อ)';
+  } else if (!confOK) {
     sig = `HOLD — Conf ต่ำ (${conf}% / ต้อง ${threshold}%)`;
   } else if (extremeRSI) {
     sig = `HOLD — RSI Extreme (${rsi.toFixed(0)}) Trap Risk`;
@@ -682,11 +688,25 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   if (multitf && multitf.alignment === 'conflicted') threshold += 5; // TF mixed → เข้มขึ้น
   threshold = Math.max(70, Math.min(92, threshold));
 
+  // ── v3.6: EXHAUSTION BRAKE ──
+  // หยุดเข้าตอนตลาด over-extended (ดิ่ง/พุ่งเร็วเกิน + RSI สุดขั้ว = เสี่ยงกลับตัว)
+  // แก้ปัญหา #6,7,8 R18: SHORT ตอนก้น → เด้งใส่
+  const recent3 = ec.slice(-4, -1);  // 3 candle ก่อนหน้า
+  const peak3 = Math.max(...recent3, price);
+  const trough3 = Math.min(...recent3, price);
+  const dropFast = (peak3 - price) / peak3;     // ดิ่งเร็วกี่ %
+  const pumpFast = (price - trough3) / trough3;  // พุ่งเร็วกี่ %
+  // SHORT exhaustion: ดิ่งเร็ว > 2.5% + RSI < 30 → ใกล้ก้น ห้าม SHORT
+  const shortExhausted = dropFast > 0.025 && rsi < 30;
+  // LONG exhaustion: พุ่งเร็ว > 2.5% + RSI > 70 → ใกล้ยอด ห้าม LONG
+  const longExhausted = pumpFast > 0.025 && rsi > 70;
+
   const opts = { 
-    aboveEMA50: trendAlignLong && longOK4h && regimeOK && longOKtf, 
-    belowEMA50: trendAlignShort && shortOK4h && regimeOK && shortOKtf, 
+    aboveEMA50: trendAlignLong && longOK4h && regimeOK && longOKtf && !longExhausted, 
+    belowEMA50: trendAlignShort && shortOK4h && regimeOK && shortOKtf && !shortExhausted, 
     atrOK,
-    threshold  // ส่งเข้า calcSignal
+    threshold,
+    shortExhausted, longExhausted  // ส่งเข้า calcSignal เพื่อแสดงเหตุผล
   };
   const regimeTrending = regime && regime.regime === 'TRENDING';
   const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong, regimeTrending, sigDir: 'long'});
@@ -705,6 +725,8 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   // v3.1: displaySig — sig ที่ควรแสดง (ทิศ conf สูงกว่า) — decision อยู่ logic
   const displaySig = confShort > confLong ? sigShort.sig : sigLong.sig;
   const displayDir = confShort > confLong ? 'short' : 'long';
+  // v3.6: exhaustion info
+  const exhaustion = { shortExhausted, longExhausted, dropFast: +(dropFast*100).toFixed(1), pumpFast: +(pumpFast*100).toFixed(1) };
 
   return {
     macd, obv, rsi, atr, trap, btcMacd,
@@ -717,7 +739,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     bouncedUp, droppedDown, recentLow, recentHigh,
     confLong, confShort,
     sigLong, sigShort,
-    best, displaySig, displayDir,
+    best, displaySig, displayDir, exhaustion,
     fg
   };
 }
