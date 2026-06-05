@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.40
+// ETH Cone Bot v3.41
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.40'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.41'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.33';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -57,7 +57,7 @@ const BURST_SIZE        = 100;       // $100 เท่า Engine A
 const BURST_TP_MULT     = 4.5;       // TP ใหญ่ (burst วิ่งแรง)
 const BURST_SL_MULT     = 0.5;       // SL แคบ (ไม่ทะลุ = ออกเร็ว)
 const BURST_DURATION_MS = 2700000;   // 45 นาที (สั้น)
-const BURST_STRENGTH_MIN = 70;  // v3.37: ลดจาก 80 (เริ่มเก็บ data — squeeze+dir พอ)       // strength ขั้นต่ำ
+const BURST_STRENGTH_MIN = 85;  // v3.41: ขยับ 70→85 (str<80 แพ้หมด 3/3, str90 ชนะ 2/2)
 const BURST_COOLDOWN_MS = 1800000;   // 30 นาที
 
 // ── Trade Mode Config ──────────────────────────
