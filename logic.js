@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.6';
+const ETH_LOGIC_VERSION = '3.7';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -492,10 +492,16 @@ function detectPreBurst(klines1h, klines15m) {
   const bouncedFromLow = (price - trough5) / trough5 > 0.003;  // เด้ง > 0.3% จากก้น
   const droppedFromHigh = (peak5 - price) / peak5 > 0.003;     // ลง > 0.3% จากยอด
 
-  // Reversal LONG: ดิ่งแรง >2.5% + RSI<30 + เด้งจากก้นแล้ว → จับเด้งขึ้น
-  const revLong = drop5 > 0.020 && rsi14 < 35 && bouncedFromLow;
-  // Reversal SHORT: พุ่งแรง >2.5% + RSI>70 + ลงจากยอดแล้ว → จับเด้งลง
-  const revShort = pump5 > 0.020 && rsi14 > 65 && droppedFromHigh;
+  // v3.7 CONFIRMATION: เด้ง 2 candle ติด (ไม่ใช่เด้งแรกหลอก) — แก้ #7 R19
+  // #7: เข้า $1583 (เด้งแรก) → ลงต่อ $1557 (ก้นจริง) → แพ้
+  const c2 = c1h[c1h.length-2], c3 = c1h[c1h.length-3];
+  const confirmUp = price > c2 && c2 >= c3;    // 2 candle เขียวติด (เด้งยืน)
+  const confirmDown = price < c2 && c2 <= c3;  // 2 candle แดงติด (ร่วงยืน)
+
+  // Reversal LONG: ดิ่งแรง + RSI<35 + เด้งจากก้น + confirm 2 candle ขึ้น
+  const revLong = drop5 > 0.020 && rsi14 < 35 && bouncedFromLow && confirmUp;
+  // Reversal SHORT: พุ่งแรง + RSI>65 + ลงจากยอด + confirm 2 candle ลง
+  const revShort = pump5 > 0.020 && rsi14 > 65 && droppedFromHigh && confirmDown;
   const drop3 = drop5, pump3 = pump5;  // alias สำหรับ strength/reason
   const reversalBurst = revLong || revShort;
   const revDir = revLong ? 'long' : (revShort ? 'short' : 'neutral');
@@ -513,8 +519,8 @@ function detectPreBurst(klines1h, klines15m) {
   const sweptLow = candleLow < prevLow20 && price > prevLow20;
   // Sweep SHORT: ไส้เทียนทะลุ high เดิม แต่ราคาปิดกลับใต้ high เดิม
   const sweptHigh = candleHigh > prevHigh20 && price < prevHigh20;
-  const sweepLong = sweptLow && obv.slope > 0;    // มีแรงซื้อยืนยัน
-  const sweepShort = sweptHigh && obv.slope < 0;     // มีแรงขายยืนยัน
+  const sweepLong = sweptLow && obv.slope > 0 && price > c2;    // v3.7: + ปิดเหนือ candle ก่อน (ยืน)
+  const sweepShort = sweptHigh && obv.slope < 0 && price < c2;   // v3.7: + ปิดใต้ candle ก่อน (ยืน)
   const liquiditySweep = sweepLong || sweepShort;
   const sweepDir = sweepLong ? 'long' : (sweepShort ? 'short' : 'neutral');
 
@@ -688,18 +694,29 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   if (multitf && multitf.alignment === 'conflicted') threshold += 5; // TF mixed → เข้มขึ้น
   threshold = Math.max(70, Math.min(92, threshold));
 
-  // ── v3.6: EXHAUSTION BRAKE ──
+  // ── v3.6: EXHAUSTION BRAKE + v3.7 COOLDOWN ──
   // หยุดเข้าตอนตลาด over-extended (ดิ่ง/พุ่งเร็วเกิน + RSI สุดขั้ว = เสี่ยงกลับตัว)
-  // แก้ปัญหา #6,7,8 R18: SHORT ตอนก้น → เด้งใส่
-  const recent3 = ec.slice(-4, -1);  // 3 candle ก่อนหน้า
+  const recent3 = ec.slice(-4, -1);
   const peak3 = Math.max(...recent3, price);
   const trough3 = Math.min(...recent3, price);
-  const dropFast = (peak3 - price) / peak3;     // ดิ่งเร็วกี่ %
-  const pumpFast = (price - trough3) / trough3;  // พุ่งเร็วกี่ %
-  // SHORT exhaustion: ดิ่งเร็ว > 2.5% + RSI < 30 → ใกล้ก้น ห้าม SHORT
-  const shortExhausted = dropFast > 0.025 && rsi < 30;
-  // LONG exhaustion: พุ่งเร็ว > 2.5% + RSI > 70 → ใกล้ยอด ห้าม LONG
-  const longExhausted = pumpFast > 0.025 && rsi > 70;
+  const dropFast = (peak3 - price) / peak3;
+  const pumpFast = (price - trough3) / trough3;
+
+  // v3.7 COOLDOWN: ดู recovery zone — เพิ่งมีก้นลึกใน 10 candle ล่าสุดมั้ย
+  // แก้ #6,#9 R19: ก้น RSI<30 → เด้ง RSI 36 → SHORT → เด้งต่อ แพ้
+  const recent10 = ec.slice(-11, -1);
+  const low10 = Math.min(...recent10, price);
+  const recoveryFromLow = (price - low10) / low10;  // เด้งจากก้น 10 candle กี่ %
+  // ยังอยู่ recovery zone: เด้งจากก้น 0.3-3% = "เพิ่งเด้ง" (เด้งหลอกเสี่ยง)
+  const inRecoveryZone = recoveryFromLow > 0.003 && recoveryFromLow < 0.03;
+
+  // SHORT exhaustion: (ดิ่งเร็ว+RSI<30) หรือ (เพิ่งเด้งจากก้น+RSI ยังต่ำ<42)
+  const shortExhausted = (dropFast > 0.025 && rsi < 30) || (inRecoveryZone && rsi < 42);
+  // LONG exhaustion: (พุ่งเร็ว+RSI>70) หรือ (เพิ่งย่อจากยอด+RSI ยังสูง>58)
+  const recent10H = Math.max(...recent10, price);
+  const pullbackFromHigh = (recent10H - price) / recent10H;
+  const inPullbackZone = pullbackFromHigh > 0.003 && pullbackFromHigh < 0.03;
+  const longExhausted = (pumpFast > 0.025 && rsi > 70) || (inPullbackZone && rsi > 58);
 
   const opts = { 
     aboveEMA50: trendAlignLong && longOK4h && regimeOK && longOKtf && !longExhausted, 
