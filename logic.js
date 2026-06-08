@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.8';
+const ETH_LOGIC_VERSION = '3.9';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -724,8 +724,13 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   const recent10H = Math.max(...recent10, price);
   const pullbackFromHigh = (recent10H - price) / recent10H;
   const inPullbackZone = pullbackFromHigh > 0.003 && pullbackFromHigh < 0.03;
-  let longExhausted = (pumpFast > 0.025 && rsi > 70) || (inPullbackZone && rsi > 58);
-  if (trend4hEarlyBull && rsi < 72) longExhausted = false;  // v3.8: uptrend เริ่ม ผ่อน (RSI<72 OK)
+  // v3.9: แยก 2 เงื่อนไข (สมมาตรกับ SHORT cooldown)
+  const longPumpExhausted = pumpFast > 0.025 && rsi > 70;       // พุ่งเร็ว+RSI สูง
+  const longPullbackZone = inPullbackZone && rsi > 58;           // เพิ่งย่อจากยอด (cooldown)
+  let longExhausted = longPumpExhausted || longPullbackZone;
+  // early-bull ผ่อนเฉพาะ "พุ่งเร็ว" (uptrend เริ่มต้องพุ่ง) — แต่ยัง block "เพิ่งย่อจากยอด"
+  // แก้ #1,#3,#6 R20: LONG เข้ายอด → ย่อ (เหมือน SHORT เข้าก้น → เด้ง)
+  if (trend4hEarlyBull && rsi < 72 && !longPullbackZone) longExhausted = false;
 
   const opts = { 
     aboveEMA50: trendAlignLong && longOK4h && regimeOK && longOKtf && !longExhausted, 
