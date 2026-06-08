@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.7';
+const ETH_LOGIC_VERSION = '3.8';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -584,8 +584,9 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   const ec = ethKlines.map(k => parseFloat(k[4]));
   const bc = btcKlines.map(k => parseFloat(k[4]));
 
-  // ── 4H Trend Filter (v2.4) ──
+  // ── 4H Trend Filter (v2.4 + v3.8 early-trend) ──
   let trend4hBull = null, trend4hBear = null;
+  let trend4hEarlyBull = false;  // v3.8: uptrend เริ่ม (ไม่ต้องรอ EMA50)
   if (ethKlines4h && ethKlines4h.length >= 50) {
     const ec4h = ethKlines4h.map(k => parseFloat(k[4]));
     const ema20_4h = calcEMA(ec4h, 20);
@@ -593,6 +594,13 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     const price4h  = ec4h[ec4h.length - 1];
     trend4hBull = price4h > ema50_4h && ema20_4h > ema50_4h;
     trend4hBear = price4h < ema50_4h && ema20_4h < ema50_4h;
+
+    // v3.8 EARLY BULL: uptrend กำลังเริ่ม (EMA50 ช้า → ใช้ EMA20 + slope)
+    // เงื่อนไข: ราคาเหนือ EMA20 + EMA20 ชันขึ้น (3 แท่งก่อน EMA20 ต่ำกว่า)
+    const ema20_prev = calcEMA(ec4h.slice(0, -3), 20);
+    const ema20Rising = ema20_4h > ema20_prev;            // EMA20 ชันขึ้น
+    const aboveEMA20_4h = price4h > ema20_4h;             // ราคาเหนือ EMA20
+    trend4hEarlyBull = aboveEMA20_4h && ema20Rising && trend4hBear;  // bear กำลังกลับ
   }
 
   // ── Market Regime Detector (v2.5 — Phase A) ──
@@ -675,7 +683,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
 
   // Signal ทั้งสองฝั่ง พร้อม EMA, ATR และ Momentum filter
   // 4H filter + Regime + Multi-TF
-  const longOK4h  = trend4hBull !== false;
+  const longOK4h  = trend4hBull !== false || trend4hEarlyBull;  // v3.8: early bull ผ่าน
   const shortOK4h = trend4hBear !== false;
   const regimeOK  = !regime || (regime.regime !== 'VOLATILE' && regime.regime !== 'RANGING'); // block both VOLATILE และ RANGING
   const longOKtf  = !multitf || multitf.direction === 'bull' || multitf.direction === 'neutral';
@@ -716,7 +724,8 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   const recent10H = Math.max(...recent10, price);
   const pullbackFromHigh = (recent10H - price) / recent10H;
   const inPullbackZone = pullbackFromHigh > 0.003 && pullbackFromHigh < 0.03;
-  const longExhausted = (pumpFast > 0.025 && rsi > 70) || (inPullbackZone && rsi > 58);
+  let longExhausted = (pumpFast > 0.025 && rsi > 70) || (inPullbackZone && rsi > 58);
+  if (trend4hEarlyBull && rsi < 72) longExhausted = false;  // v3.8: uptrend เริ่ม ผ่อน (RSI<72 OK)
 
   const opts = { 
     aboveEMA50: trendAlignLong && longOK4h && regimeOK && longOKtf && !longExhausted, 
@@ -751,7 +760,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     rsiSlope, momentumLong, momentumShort,
     aboveEMA20, belowEMA20, trendAlignLong, trendAlignShort,
     volRatio, atrRatio, atrPct, candleBull,
-    trend4hBull, trend4hBear,
+    trend4hBull, trend4hBear, trend4hEarlyBull,
     regime, multitf, threshold,
     bouncedUp, droppedDown, recentLow, recentHigh,
     confLong, confShort,
