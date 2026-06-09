@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.42
+// ETH Cone Bot v3.43
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.42'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.43'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.33';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -131,7 +131,7 @@ let GLOBAL_SL_AMOUNT    = 0;    // Paper Global SL ($) — 0 = ปิด
 let globalSLActive      = false;
 let dailyPnL            = 0;    // PnL รวมวันนี้
 const ATR_MULT_TP1      = 1.0;  // v3.40: TP1 ใกล้ขึ้น (1.5→1.0) — ถึงจริง ปิดเก็บกำไร
-const ATR_MULT_TP2      = 3.0;  // TP2 = entry ± ATR*3.0 (ปล่อยวิ่ง)
+const ATR_MULT_TP2      = 2.2;  // v3.43: ลด 3.0→2.2 (data: ×3 hit แค่ 29%, ×2 ก็ 30% — ปิดเร็วขึ้น)
 const ATR_MULT_SL       = 0.75; // SL  = entry ∓ ATR*0.75
 const TRAIL_BREAKEVEN   = 0.5;   // v3.40: ขยับช้าลง (0.3→0.5) ให้ราคาแกว่งได้
 const TRAIL_LOCK        = 0.8;   // v3.40: lock ช้าลง (0.6→0.8)
