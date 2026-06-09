@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.9';
+const ETH_LOGIC_VERSION = '3.10';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -168,10 +168,14 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   // v3.2: RSI Adaptive ตาม regime
   // TRENDING → ผ่อน (ตามเทรนด์) | RANGING → เข้ม (กันเด้ง) | VOLATILE → เข้มสุด
   let rsiShortMin = 35, rsiLongMax = 62;  // default (RANGING-like)
+  const earlyBull = options.earlyBull || false;  // v3.10
   if (regimeTrending) {
     rsiShortMin = 25;   // downtrend แรง RSI ต่ำ = ปกติ → SHORT ได้
     rsiLongMax = 75;    // uptrend แรง RSI สูง = ปกติ → LONG ได้
   }
+  // v3.10: early-bull = uptrend เพิ่งเริ่ม (ยังไม่ confirm) → RSI ceiling เข้มขึ้น
+  // แก้ #6,#8 R20: LONG เข้า RSI 67,58 (ยอด) → ย่อ
+  if (earlyBull) rsiLongMax = 62;  // ไม่ LONG ตอน RSI > 62 (ใกล้ยอด)
   const rsiOB     = rsi > rsiLongMax;
   const goOnly    = options.goOnly || false;     // true = GO cross เท่านั้น
   const aboveEMA  = options.aboveEMA50 !== undefined ? options.aboveEMA50 : true;
@@ -189,7 +193,7 @@ function calcSignal(macd1h, obv, rsi, trap, conf, options = {}) {
   if (regimeTrending) {
     // ตลาด trend: SHORT+RSI ต่ำ หรือ LONG+RSI สูง = ตามเทรนด์ ไม่ block
     if (sigDir === 'short' && rsi < 35 && rsi > 25) extremeRSI = false; // downtrend RSI ต่ำ OK (แต่ < 25 ยัง block)
-    if (sigDir === 'long'  && rsi > 65 && rsi < 75) extremeRSI = false; // uptrend RSI สูง OK (แต่ > 75 ยัง block)
+    if (sigDir === 'long'  && rsi > 65 && rsi < 75 && !earlyBull) extremeRSI = false; // uptrend RSI สูง OK (early-bull ยังเข้ม)
   }
   if (sigDir === 'short' && shortExhausted) {
     sig = 'HOLD — Over-extended (ดิ่งเร็ว+RSI ต่ำ — เสี่ยงเด้ง)';
@@ -737,7 +741,7 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
     belowEMA50: trendAlignShort && shortOK4h && regimeOK && shortOKtf && !shortExhausted, 
     atrOK,
     threshold,
-    shortExhausted, longExhausted  // ส่งเข้า calcSignal เพื่อแสดงเหตุผล
+    shortExhausted, longExhausted, earlyBull: trend4hEarlyBull  // v3.10
   };
   const regimeTrending = regime && regime.regime === 'TRENDING';
   const sigLong  = calcSignal(macd, obv, rsi, trap, confLong,  {...opts, momentumOK: momentumLong, regimeTrending, sigDir: 'long'});
