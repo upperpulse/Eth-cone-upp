@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.10';
+const ETH_LOGIC_VERSION = '3.11';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -722,8 +722,13 @@ function calcBestDirection(ethKlines, btcKlines, funding, trap, fg, ethKlines4h 
   // ยังอยู่ recovery zone: เด้งจากก้น 0.3-3% = "เพิ่งเด้ง" (เด้งหลอกเสี่ยง)
   const inRecoveryZone = recoveryFromLow > 0.003 && recoveryFromLow < 0.03;
 
-  // SHORT exhaustion: (ดิ่งเร็ว+RSI<30) หรือ (เพิ่งเด้งจากก้น+RSI ยังต่ำ<42)
-  const shortExhausted = (dropFast > 0.025 && rsi < 30) || (inRecoveryZone && rsi < 42);
+  // SHORT exhaustion (v3.11 ขยาย zone):
+  // (1) ดิ่งเร็ว+RSI<30  (2) เพิ่งเด้งจากก้น+RSI<42  (3) RSI<38 ใกล้ก้น (choppy)
+  // แก้ #2,#3,#8,#10 R21: SHORT RSI 31-43 → เด้งสวน (ตลาด choppy)
+  const nearLow = recoveryFromLow < 0.015;  // ราคาใกล้ low 10 candle (< 1.5%)
+  const shortExhausted = (dropFast > 0.025 && rsi < 30)
+    || (inRecoveryZone && rsi < 42)
+    || (rsi < 38 && nearLow);  // v3.11: RSI ต่ำ + ใกล้ก้น = เด้งเสี่ยง
   // LONG exhaustion: (พุ่งเร็ว+RSI>70) หรือ (เพิ่งย่อจากยอด+RSI ยังสูง>58)
   const recent10H = Math.max(...recent10, price);
   const pullbackFromHigh = (recent10H - price) / recent10H;
