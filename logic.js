@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.11';
+const ETH_LOGIC_VERSION = '3.12';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -101,6 +101,8 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap, extra = {}) {
     if (obv.positive)     score += 5;
     if (obv.slope > 0)    score += 8;   // เพิ่มจาก 2 → 8 (ML: OBV ทำนายดีสุด)
     if (obv.slope < 0)    score -= 10;  // LONG แต่ OBV ลง = ไม่มีแรงซื้อ → penalty
+    // v3.12: OBV strength penalty — แรงซื้ออ่อน = ปลาย uptrend (เด้งหมดแรง)
+    if (obv.slope > 0 && obv.slope < 30000) score -= 7;  // บวกแต่อ่อน → ใกล้ยอด
     if (btcMacd.positive) score += 8;
     if (rsi > 32 && rsi < 55) score += 4; // sweet spot LONG
     if (rsi < 30)         score -= 12;
@@ -114,6 +116,9 @@ function calcConfidence(macd, rsi, obv, btcMacd, funding, trap, extra = {}) {
     if (!obv.positive)     score += 5;
     if (obv.slope < 0)     score += 8;  // เพิ่มจาก 2 → 8 (ML: OBV ทำนายดีสุด)
     if (obv.slope > 0)     score -= 10; // SHORT แต่ OBV ขึ้น = ไม่มีแรงขาย → penalty
+    // v3.12: OBV strength penalty — แรงขายอ่อน = ปลาย downtrend (ก้นเด้ง)
+    // ML: WIN OBV -79k (แรง) vs LOSS -22k (อ่อน) → ลบอ่อน = เด้งเสี่ยง
+    if (obv.slope < 0 && obv.slope > -30000) score -= 7;  // ลบแต่อ่อน → ใกล้ก้น
     if (!btcMacd.positive) score += 8;
     if (rsi > 45 && rsi < 70) score += 4;
     if (rsi < 35)          score -= 8;
