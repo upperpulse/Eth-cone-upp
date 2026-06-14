@@ -4,7 +4,7 @@
 // แก้ที่นี่ที่เดียว — sync ทั้งคู่อัตโนมัติ
 // ============================================================
 
-const ETH_LOGIC_VERSION = '3.12';
+const ETH_LOGIC_VERSION = '3.13';
 const CONF_THRESHOLD = 80; // sync กับ confOK threshold
 
 // ── Indicators ──────────────────────────────────────────────
@@ -470,8 +470,11 @@ function detectPreBurst(klines1h, klines15m) {
   // - ราคาใต้ EMA50 + OBV ลบ → จะ breakout ลง (short)
   let direction = 'neutral';
   const aboveEMA50 = price > ema50;
-  if (aboveEMA50 && obv.slope >= 0 && posInRange > 0.4) direction = 'long';
-  else if (!aboveEMA50 && obv.slope <= 0 && posInRange < 0.6) direction = 'short';
+  const rsiSq = calcRSI(c1h, 14);  // v3.13: RSI guard สำหรับ squeeze
+  // v3.13: squeeze ไม่เดา LONG ตอนยอด (RSI>58) / ไม่เดา SHORT ตอนก้น (RSI<42)
+  // แก้ #9,#10: squeeze LONG ตอน RSI 60 (ยอด) → ย่อ → SL
+  if (aboveEMA50 && obv.slope >= 0 && posInRange > 0.45 && rsiSq < 58) direction = 'long';
+  else if (!aboveEMA50 && obv.slope <= 0 && posInRange < 0.55 && rsiSq > 42) direction = 'short';
 
   // ── 5. 15m EMA50 trend confirm (ไม่ใช่ EMA9/21 spread) ──
   let momentum15m = 'neutral';
