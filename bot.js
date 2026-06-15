@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.43
+// ETH Cone Bot v3.44
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.43'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.44'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.33';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -698,7 +698,7 @@ async function startAutoPaperTrade(sig, price, dir, atr, conf, trigs, features =
         if (autoTrades.length >= AUTO_TRADE_TARGET_DYNAMIC) await sendSummary();
       }
     }
-  }, 10000);
+  }, 5000);  // v3.44: 10s→5s จับ spike ทัน (แก้ #2 maxP$1.37→ย่อ)
 }
 
 function saveAutoTrades() {
