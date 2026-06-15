@@ -1,8 +1,8 @@
-// ETH Cone Bot v3.44
+// ETH Cone Bot v3.45
 // ⚠️ Rule: ทุกครั้งที่ update Dashboard ต้อง update version บรรทัดนี้ด้วย
 // 🔗 Logic: ดึงจาก logic.js — แก้ที่ logic.js เท่านั้น
 
-const BOT_VERSION = 'v3.44'; // ← แก้ที่นี่ที่เดียว
+const BOT_VERSION = 'v3.45'; // ← แก้ที่นี่ที่เดียว
 const DASH_VERSION = 'v5.33';
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
@@ -136,7 +136,7 @@ const ATR_MULT_SL       = 0.75; // SL  = entry ∓ ATR*0.75
 const TRAIL_BREAKEVEN   = 0.5;   // v3.40: ขยับช้าลง (0.3→0.5) ให้ราคาแกว่งได้
 const TRAIL_LOCK        = 0.8;   // v3.40: lock ช้าลง (0.6→0.8)
 const TRAIL_PROFIT_LOCK = 0.7;   // v3.40: ล็อก 70% ของ maxP (เก็บได้มากขึ้น)
-const TRAIL_PROFIT_MIN  = 2.0;   // v3.40: เริ่มล็อกเมื่อ maxP > $2.0 (ให้วิ่งเต็มที่ก่อน)
+const TRAIL_PROFIT_MIN  = 1.0;   // v3.45: 2.0→1.0 (5m OOS ยืนยัน +$7.21 Kelly85% — เก็บก่อนกำไรคืน)
 const PARTIAL_TP_RATIO  = 0.5;   // ปิด 50% เมื่อถึง TP1
 const TRADE_COOLDOWN_MS = 1800000; // 30 นาที cooldown หลัง trade จบ
 
