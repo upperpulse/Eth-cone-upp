@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  ETH DONCHIAN BOT v1.0 — Turtle Trend-Following
+//  ETH TURTLE PRO v1.0 — Turtle Trend-Following
 //  Strategy: D40 breakout + trail ATR×3 + exit Donchian20
 //  พิสูจน์แล้ว: 4.3 ปี +$241, 4/4 ปีกำไร, ผ่าน OOS, ชนะ B&H +$338
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง (พิสูจน์ก่อน)
@@ -185,7 +185,7 @@ async function openPosition(dir, entry, atr) {
     initialSL: sl, riskAmt, entryTs: Date.now() };
 
   const notional = qty * entry;
-  await tg(`🐢 <b>DONCHIAN ENTRY — ${dir.toUpperCase()}</b>\n\n` +
+  await tg(`🐢 <b>TURTLE PRO ENTRY — ${dir.toUpperCase()}</b>\n\n` +
     `Entry: $${f(entry)}\nSL: $${f(sl)} (ATR×${TRAIL_ATR})\n` +
     `Qty: ${qty.toFixed(4)} ETH ($${f(notional)})\n` +
     `Risk: $${f(riskAmt)} (${(RISK_PER_TRADE*100)}%)\n` +
@@ -222,7 +222,7 @@ async function closePosition(exit, reason) {
 
   const win = pnl > 0;
   const emoji = win ? '🟢' : '🔴';
-  await tg(`${emoji} <b>DONCHIAN EXIT — ${reason}</b>\n\n` +
+  await tg(`${emoji} <b>TURTLE PRO EXIT — ${reason}</b>\n\n` +
     `${dir.toUpperCase()} $${f(entry)} → $${f(exit)}\n` +
     `PnL: $${f(pnl)} (${rMultiple > 0 ? '+' : ''}${rMultiple.toFixed(2)}R) ${win ? '✅' : ''}\n` +
     `ถือ: ${holdH} ชม. | MFE $${f(mfe)} MAE $${f(mae)}\n` +
@@ -326,7 +326,7 @@ async function pollTelegram() {
       const text = (u.message?.text || '').trim().toLowerCase();
       if (text === '/stats' || text === '/status') {
         const pos = position ? `\n\n📍 Position: ${position.dir.toUpperCase()} @ $${f(position.entry)} SL $${f(position.sl)}` : '\n\n📍 FLAT (รอ signal)';
-        await tg(`🐢 <b>Donchian Bot ${BOT_VERSION}</b>\n\n${getStats()}${pos}${halted ? '\n\n🛑 HALTED (max DD)' : ''}`);
+        await tg(`🐢 <b>ETH Turtle Pro ${BOT_VERSION}</b>\n\n${getStats()}${pos}${halted ? '\n\n🛑 HALTED (max DD)' : ''}`);
       } else if (text === '/resume' && halted) {
         halted = false; peakEquity = accountEquity;
         await tg('▶️ Resume — เริ่มเทรดใหม่ (reset peak)');
@@ -350,13 +350,13 @@ http.createServer((req, res) => {
       position: position ? position.dir : null, halted
     }));
   } else { res.writeHead(404); res.end(); }
-}).listen(PORT, () => console.log(`Donchian health :${PORT}`));
+}).listen(PORT, () => console.log(`ETH Turtle Pro health :${PORT}`));
 
 // ═══════════════ STARTUP ═══════════════
 loadState();
-console.log(`🐢 ETH Donchian Bot ${BOT_VERSION} — D${ENTRY_PERIOD}/exit${EXIT_PERIOD}/trail${TRAIL_ATR}`);
+console.log(`🐢 ETH Turtle Pro ${BOT_VERSION} — D${ENTRY_PERIOD}/exit${EXIT_PERIOD}/trail${TRAIL_ATR}`);
 console.log(`Risk ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity}`);
-tg(`🐢 <b>Donchian Bot ${BOT_VERSION} เริ่มทำงาน</b>\n\nStrategy: D40 breakout + trail ATR×3 + exit D20\nRisk: ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}%\nEquity: $${accountEquity}\n\n⚠️ PAPER MODE (ยังไม่ส่ง order จริง)`);
+tg(`🐢 <b>ETH Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\nStrategy: D40 breakout + trail ATR×3 + exit D20\nRisk: ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}%\nEquity: $${accountEquity}\n\n⚠️ PAPER MODE (ยังไม่ส่ง order จริง)`);
 
 // loop ทุก 5 นาที (1h timeframe — เช็คถี่กว่าเพื่อจับ breakout ทันที)
 checkSignal();
