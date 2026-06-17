@@ -17,6 +17,7 @@ const TRADES_FILE = '/home/ubuntu/eth-bot/donchian_trades.json';
 const SIGNAL_LOG  = '/home/ubuntu/eth-bot/donchian_signals.csv';   // ทุกการเช็ค (วิเคราะห์ภายหลัง)
 const EQUITY_LOG  = '/home/ubuntu/eth-bot/donchian_equity.csv';    // equity snapshot รายวัน
 const TRADE_CSV   = '/home/ubuntu/eth-bot/donchian_trades.csv';    // trade log อ่านง่าย
+const ML_LOG      = '/home/ubuntu/eth-bot/turtle_ml.jsonl';        // ML dataset (feature+ผล สำหรับ train model)
 
 // ── STRATEGY PARAMETERS (พิสูจน์จาก backtest 4.3 ปี) ──
 const SYMBOL        = 'ETHUSDT';
@@ -60,6 +61,27 @@ function calcATR(kl, p = ATR_PERIOD) {
     s += Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
   }
   return s / p;
+}
+// ── ML feature indicators (เก็บไว้ train model อนาคต) ──
+function calcRSI(cls, p = 14) {
+  if (cls.length < p + 1) return 50;
+  let g = 0, l = 0;
+  for (let i = cls.length - p; i < cls.length; i++) {
+    const ch = cls[i] - cls[i-1];
+    if (ch > 0) g += ch; else l -= ch;
+  }
+  const rs = g / (l || 1);
+  return 100 - 100 / (1 + rs);
+}
+function calcOBVSlope(kl, lookback = 20) {
+  if (kl.length < lookback + 1) return 0;
+  let obv = 0; const series = [];
+  for (let i = kl.length - lookback; i < kl.length; i++) {
+    const ch = +kl[i][4] - +kl[i-1][4];
+    obv += ch > 0 ? +kl[i][5] : ch < 0 ? -kl[i][5] : 0;
+    series.push(obv);
+  }
+  return series.length > 1 ? (series[series.length-1] - series[0]) / series.length : 0;
 }
 function f(n) { return n.toFixed(2); }
 
@@ -168,21 +190,32 @@ async function checkSignal() {
   logSignal(price, entryHigh, entryLow, atr, distToHigh, distToLow);
 
   if (price > entryHigh) {
-    await openPosition('long', price, atr);
+    await openPosition('long', price, atr, kl, entryHigh, entryLow);
   } else if (price < entryLow) {
-    await openPosition('short', price, atr);
+    await openPosition('short', price, atr, kl, entryHigh, entryLow);
   }
   saveState();
 }
 
-async function openPosition(dir, entry, atr) {
+async function openPosition(dir, entry, atr, kl, entryHigh, entryLow) {
   const sl = dir === 'long' ? entry - atr * TRAIL_ATR : entry + atr * TRAIL_ATR;
   const qty = calcPositionSize(entry, sl);
   if (qty <= 0) return;
 
+  // ML features ตอน entry (เก็บไว้ train model อนาคต)
+  const cls = kl.map(k => +k[4]);
+  const features = {
+    rsi: +calcRSI(cls).toFixed(2),
+    obvSlope: +calcOBVSlope(kl).toFixed(0),
+    atrPct: +(atr / entry * 100).toFixed(3),       // ATR เป็น % ของราคา (volatility)
+    breakoutStrength: +(Math.abs(entry - (dir==='long'?entryHigh:entryLow)) / atr).toFixed(3), // ทะลุแรงแค่ไหน (×ATR)
+    channelWidth: +((entryHigh - entryLow) / entry * 100).toFixed(2), // กว้างของ channel (%)
+    momentum: +((cls[cls.length-1] - cls[cls.length-6]) / cls[cls.length-6] * 100).toFixed(2) // momentum 5 แท่ง
+  };
+
   const riskAmt = Math.abs(entry - sl) * qty;
   position = { dir, entry, sl, peak: entry, trough: entry, qty, bars: 0, atr,
-    initialSL: sl, riskAmt, entryTs: Date.now() };
+    initialSL: sl, riskAmt, entryTs: Date.now(), features };
 
   const notional = qty * entry;
   await tg(`🐢 <b>TURTLE PRO ENTRY — ${dir.toUpperCase()}</b>\n\n` +
@@ -219,6 +252,7 @@ async function closePosition(exit, reason) {
   };
   trades.push(trade);
   logTradeCSV(trade);
+  logML(position.features, trade);   // บันทึก ML (feature ตอนเข้า + ผลลัพธ์)
 
   const win = pnl > 0;
   const emoji = win ? '🟢' : '🔴';
@@ -248,6 +282,25 @@ function logSignal(price, hi, lo, atr, distHi, distLo) {
     }
     const row = `${new Date().toISOString()},${price.toFixed(2)},${hi.toFixed(2)},${lo.toFixed(2)},${atr.toFixed(2)},${distHi.toFixed(2)},${distLo.toFixed(2)},${position ? 1 : 0}\n`;
     fs.appendFileSync(SIGNAL_LOG, row);
+  } catch (e) {}
+}
+
+// ML dataset: feature ตอนเข้า + ผลลัพธ์ (สำหรับ train model อนาคต)
+function logML(features, trade) {
+  try {
+    const record = {
+      ts: new Date().toISOString(),
+      dir: trade.dir,
+      ...features,                          // rsi, obvSlope, atrPct, breakoutStrength, channelWidth, momentum
+      pnl: trade.pnl,
+      rMultiple: trade.rMultiple,
+      win: trade.pnl > 0 ? 1 : 0,
+      reason: trade.reason,
+      holdHours: trade.bars,
+      mfe: trade.mfe,
+      mae: trade.mae
+    };
+    fs.appendFileSync(ML_LOG, JSON.stringify(record) + '\n');
   } catch (e) {}
 }
 
