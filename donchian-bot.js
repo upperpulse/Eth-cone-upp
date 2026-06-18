@@ -153,7 +153,7 @@ async function checkSignal() {
 
   // ───────── มี position: จัดการ exit/trail ─────────
   if (position) {
-    position.bars++;
+    // bars คำนวณจากเวลาจริงตอนปิด (ไม่นับทุก loop)
     let exitReason = null;
 
     // track MAE (max adverse) — ราคาสวนทางสุด
@@ -173,7 +173,8 @@ async function checkSignal() {
       else if (price > exitHigh) exitReason = 'DONCHIAN_EXIT';
     }
 
-    console.log(`[${ts}] $${f(price)} ${position.dir.toUpperCase()} | SL $${f(position.sl)} peak $${f(position.peak)} bars ${position.bars}`);
+    const heldH = Math.round((Date.now() - position.entryTs) / 3600000);
+    console.log(`[${ts}] $${f(price)} ${position.dir.toUpperCase()} | SL $${f(position.sl)} peak $${f(position.peak)} ${heldH}h`);
 
     if (exitReason) await closePosition(price, exitReason);
     saveState();
@@ -227,7 +228,8 @@ async function openPosition(dir, entry, atr, kl, entryHigh, entryLow) {
 }
 
 async function closePosition(exit, reason) {
-  const { dir, entry, qty, peak, trough, bars, entryTs, riskAmt, atr } = position;
+  const { dir, entry, qty, peak, trough, entryTs, riskAmt, atr } = position;
+  const bars = Math.round((Date.now() - entryTs) / 3600000);  // ชั่วโมงจริง (แก้ bug นับทุก loop)
   const gross = dir === 'long' ? (exit - entry) * qty : (entry - exit) * qty;
   const fee = (entry + exit) * qty * (FEE + SLIP);
   const fundingCost = (qty * entry) * 0.0001 * (bars / 8);
@@ -336,7 +338,7 @@ async function sendDailySummary() {
   if (!todayTrades.length && !position) return;   // ไม่มีอะไรเกิด ไม่ต้องสรุป
   const todayPnl = todayTrades.reduce((s, t) => s + t.pnl, 0);
   const dd = ((peakEquity - accountEquity) / peakEquity * 100).toFixed(1);
-  const pos = position ? `${position.dir.toUpperCase()} @ $${f(position.entry)} (ถือ ${position.bars}h)` : 'FLAT';
+  const pos = position ? `${position.dir.toUpperCase()} @ $${f(position.entry)} (ถือ ${Math.round((Date.now()-position.entryTs)/3600000)}h)` : 'FLAT';
   await tg(`📊 <b>Daily Summary ${day}</b>\n\n` +
     `Trades วันนี้: ${todayTrades.length} (PnL $${f(todayPnl)})\n` +
     `Equity: $${f(accountEquity)} | DD ${dd}%\n` +
