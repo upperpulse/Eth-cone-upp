@@ -127,6 +127,39 @@ function calcPositionSize(entry, sl) {
 }
 
 // ═══════════════ CORE STRATEGY LOOP ═══════════════
+// ═══════════════ POSITION REPORT (ระหว่างถือ) ═══════════════
+function buildPositionReport(price) {
+  if (!position) return '📍 FLAT — รอ signal (ETH break D40)';
+  const { dir, entry, sl, peak, qty, entryTs } = position;
+  const floatPnl = dir === 'long' ? (price - entry) * qty : (entry - price) * qty;
+  const heldH = Math.round((Date.now() - entryTs) / 3600000);
+  const slDist = Math.abs(price - sl);
+  const locked = dir === 'long' ? (sl > entry) : (sl < entry);   // SL ล็อกกำไรแล้วมั้ย
+  const emoji = floatPnl >= 0 ? '🟢' : '🔴';
+  return `${emoji} <b>${dir.toUpperCase()} กำลังถือ</b>\n\n` +
+    `Entry $${f(entry)} → ตอนนี้ $${f(price)}\n` +
+    `กำไรลอย: $${f(floatPnl)} ${floatPnl>=0?'✅':''}\n` +
+    `ถือ: ${heldH}h | peak $${f(peak)}\n` +
+    `SL $${f(sl)} (ห่าง $${f(slDist)}) ${locked ? '🔒 ล็อกกำไรแล้ว' : ''}\n` +
+    `Equity $${f(accountEquity)}`;
+}
+
+let lastReportTs = 0;
+let lastSLForReport = 0;
+async function maybePositionReport(price) {
+  if (!position) return;
+  const now = Date.now();
+  const hoursSince = (now - lastReportTs) / 3600000;
+  // แจ้งเมื่อ: ทุก 6 ชม. หรือ SL ขยับ (trail ล็อกกำไรเพิ่ม)
+  const slMoved = lastSLForReport && Math.abs(position.sl - lastSLForReport) > 0.01;
+  if (hoursSince >= 6 || slMoved) {
+    await tg(buildPositionReport(price) + (slMoved ? '\n\n🔄 SL ขยับ (trail ตามกำไร)' : ''));
+    lastReportTs = now;
+    lastSLForReport = position.sl;
+  }
+}
+
+// ═══════════════ POSITION REPORT END ═══════════════
 async function checkSignal() {
   if (halted) return;
   logEquitySnapshot();   // snapshot รายวัน (วิเคราะห์ drawdown ภายหลัง)
@@ -177,6 +210,7 @@ async function checkSignal() {
     console.log(`[${ts}] $${f(price)} ${position.dir.toUpperCase()} | SL $${f(position.sl)} peak $${f(position.peak)} ${heldH}h`);
 
     if (exitReason) await closePosition(price, exitReason);
+    else await maybePositionReport(price);   // report ระหว่างถือ (ทุก 6 ชม. + SL ขยับ)
     saveState();
     return;
   }
@@ -382,6 +416,11 @@ async function pollTelegram() {
       if (text === '/stats' || text === '/status') {
         const pos = position ? `\n\n📍 Position: ${position.dir.toUpperCase()} @ $${f(position.entry)} SL $${f(position.sl)}` : '\n\n📍 FLAT (รอ signal)';
         await tg(`🐢 <b>ETH Turtle Pro ${BOT_VERSION}</b>\n\n${getStats()}${pos}${halted ? '\n\n🛑 HALTED (max DD)' : ''}`);
+      } else if (text === '/position' || text === '/pos') {
+        // ดูสถานะ position ปัจจุบัน (กำไรลอย real-time)
+        let price = position ? position.entry : 0;
+        try { price = await fetchPrice(); } catch {}
+        await tg(buildPositionReport(price));
       } else if (text === '/resume' && halted) {
         halted = false; peakEquity = accountEquity;
         await tg('▶️ Resume — เริ่มเทรดใหม่ (reset peak)');
