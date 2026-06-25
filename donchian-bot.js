@@ -8,6 +8,10 @@
 const BOT_VERSION = 'v1.0';
 const fs   = require('fs');
 const http = require('http');
+// Binance live module (ปิดไว้ default — paper)
+let live;
+try { live = require('./binance-live.js'); }
+catch (e) { live = { isEnabled: () => false, modeLabel: () => 'PAPER', openLive: async()=>({}), closeLive: async()=>({}), trailStopLive: async()=>({}), setLeverage: async()=>{}, getPositionLive: async()=>null }; }
 
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
@@ -182,28 +186,48 @@ async function checkSignal() {
   const exitHigh = Math.max(...exitRecent);
   const exitLow  = Math.min(...exitRecent);
 
+  // อัพเดต cache สำหรับ /dashboard (ราคา + channel + history)
+  dashCache = {
+    price,
+    channel: {
+      upper: +entryHigh.toFixed(2), lower: +entryLow.toFixed(2),
+      exit20Hi: +exitHigh.toFixed(2), exit20Lo: +exitLow.toFixed(2),
+      price: +price.toFixed(2),
+      history: cls.slice(-12).map(c => +c.toFixed(2))
+    },
+    updatedAt: Date.now()
+  };
+
   const ts = new Date().toISOString().slice(11, 19);
 
   // ───────── มี position: จัดการ exit/trail ─────────
   if (position) {
     // bars คำนวณจากเวลาจริงตอนปิด (ไม่นับทุก loop)
     let exitReason = null;
+    let slMovedForLive = false;
 
     // track MAE (max adverse) — ราคาสวนทางสุด
     if (position.dir === 'long') {
       if (price < position.trough) position.trough = price;
       if (price > position.peak) position.peak = price;
       const newSL = position.peak - atr * TRAIL_ATR;
-      if (newSL > position.sl) position.sl = newSL;
+      if (newSL > position.sl) { position.sl = newSL; slMovedForLive = true; }
       if (price <= position.sl) exitReason = 'TRAIL_SL';
       else if (price < exitLow) exitReason = 'DONCHIAN_EXIT';
     } else {
       if (price > position.trough) position.trough = price;
       if (price < position.peak) position.peak = price;
       const newSL = position.peak + atr * TRAIL_ATR;
-      if (newSL < position.sl) position.sl = newSL;
+      if (newSL < position.sl) { position.sl = newSL; slMovedForLive = true; }
       if (price >= position.sl) exitReason = 'TRAIL_SL';
       else if (price > exitHigh) exitReason = 'DONCHIAN_EXIT';
+    }
+
+    // ── LIVE: ขยับ SL จริง (cancel เก่า + ตั้งใหม่) เมื่อ trail ขยับ ──
+    if (live.isEnabled() && slMovedForLive && !exitReason) {
+      const stopSide = position.dir === 'long' ? 'SELL' : 'BUY';
+      try { await live.trailStopLive(stopSide, position.qty, position.sl); }
+      catch (e) { console.error('[LIVE] trail:', e.message); }
     }
 
     const heldH = Math.round((Date.now() - position.entryTs) / 3600000);
@@ -252,13 +276,21 @@ async function openPosition(dir, entry, atr, kl, entryHigh, entryLow) {
   position = { dir, entry, sl, peak: entry, trough: entry, qty, bars: 0, atr,
     initialSL: sl, riskAmt, entryTs: Date.now(), features };
 
+  // ── LIVE: ส่ง order จริง (ถ้าเปิด live mode) ──
+  let liveInfo = '';
+  if (live.isEnabled()) {
+    const r = await live.openLive(dir, qty, sl);
+    if (r.error) { liveInfo = `\n⚠️ LIVE error: ${r.error}`; }
+    else if (!r.simulated) { liveInfo = `\n✅ LIVE order ส่งแล้ว (${live.modeLabel()})`; }
+  }
+
   const notional = qty * entry;
   await tg(`🐢 <b>TURTLE PRO ENTRY — ${dir.toUpperCase()}</b>\n\n` +
     `Entry: $${f(entry)}\nSL: $${f(sl)} (ATR×${TRAIL_ATR})\n` +
     `Qty: ${qty.toFixed(4)} ETH ($${f(notional)})\n` +
     `Risk: $${f(riskAmt)} (${(RISK_PER_TRADE*100)}%)\n` +
-    `Equity: $${f(accountEquity)}`);
-  console.log(`>>> ENTRY ${dir} @ $${f(entry)} SL $${f(sl)} qty ${qty.toFixed(4)}`);
+    `Equity: $${f(accountEquity)}${liveInfo}`);
+  console.log(`>>> ENTRY ${dir} @ $${f(entry)} SL $${f(sl)} qty ${qty.toFixed(4)} [${live.modeLabel()}]`);
 }
 
 async function closePosition(exit, reason) {
@@ -289,6 +321,11 @@ async function closePosition(exit, reason) {
   trades.push(trade);
   logTradeCSV(trade);
   logML(position.features, trade);   // บันทึก ML (feature ตอนเข้า + ผลลัพธ์)
+
+  // ── LIVE: ปิด order จริง (cancel SL + market close) ──
+  if (live.isEnabled()) {
+    try { await live.closeLive(dir, qty); } catch (e) { console.error('[LIVE] close:', e.message); }
+  }
 
   const win = pnl > 0;
   const emoji = win ? '🟢' : '🔴';
@@ -434,23 +471,93 @@ async function pollTelegram() {
   } catch (e) {}
 }
 
-// ═══════════════ HTTP HEALTH ═══════════════
+// ═══════════════ HTTP SERVER ═══════════════
 const PORT = process.env.DONCHIAN_PORT || 3100;
+
+// cache ราคา+channel ล่าสุด (อัพเดตทุก checkSignal)
+let dashCache = { price: 0, channel: null, updatedAt: 0 };
+
+function buildDashboardData() {
+  // stats
+  const w = trades.filter(t => t.pnl > 0), l = trades.filter(t => t.pnl <= 0);
+  const tot = trades.reduce((s, t) => s + t.pnl, 0);
+  const aw = w.length ? w.reduce((s,t)=>s+t.pnl,0)/w.length : 0;
+  const al = l.length ? Math.abs(l.reduce((s,t)=>s+t.pnl,0)/l.length) : 1;
+  const W = trades.length ? w.length/trades.length : 0;
+  const payoff = al ? aw/al : 0;
+  const kelly = payoff ? (W - (1-W)/payoff)*100 : null;
+  const avgR = trades.length ? trades.reduce((s,t)=>s+(t.rMultiple||0),0)/trades.length : 0;
+  let eq = ACCOUNT_SIZE, pk = ACCOUNT_SIZE, mdd = 0;
+  trades.forEach(t => { eq = t.equity; if (eq>pk) pk=eq; if ((pk-eq)/pk>mdd) mdd=(pk-eq)/pk; });
+  const curDD = (peakEquity - accountEquity) / peakEquity * 100;
+
+  // floating pnl ของ position ปัจจุบัน
+  let posData = null;
+  if (position) {
+    const price = dashCache.price || position.entry;
+    const floatPnl = position.dir==='long' ? (price-position.entry)*position.qty : (position.entry-price)*position.qty;
+    const heldH = Math.round((Date.now() - position.entryTs)/3600000);
+    const locked = position.dir==='long' ? position.sl>position.entry : position.sl<position.entry;
+    const lockedPnl = locked ? (position.dir==='long' ? (position.sl-position.entry)*position.qty : (position.entry-position.sl)*position.qty) : 0;
+    posData = {
+      dir: position.dir, entry: position.entry, price, sl: position.sl, peak: position.peak,
+      qty: position.qty, heldH, floatPnl: +floatPnl.toFixed(2), lockedPnl: +lockedPnl.toFixed(2),
+      features: position.features || null
+    };
+  }
+
+  return {
+    mode: 'paper',
+    version: BOT_VERSION,
+    equity: +accountEquity.toFixed(2),
+    start: ACCOUNT_SIZE,
+    peakEquity: +peakEquity.toFixed(2),
+    halted,
+    position: posData,
+    stats: {
+      wr: trades.length ? Math.round(W*100) : 0,
+      kelly: kelly==null ? null : Math.round(kelly),
+      payoff: +payoff.toFixed(2),
+      avgR: +avgR.toFixed(2),
+      maxDD: +Math.max(mdd*100, curDD).toFixed(1),
+      trades: trades.length
+    },
+    trades: trades.map(t => ({
+      n: t.num, dir: t.dir, entry: t.entry, exit: t.exit,
+      pnl: t.pnl, r: t.rMultiple, reason: t.reason==='DONCHIAN_EXIT'?'DONCHIAN':'TRAIL_SL',
+      held: t.bars, mfe: t.mfe
+    })),
+    channel: dashCache.channel,
+    updatedAt: dashCache.updatedAt
+  };
+}
+
 http.createServer((req, res) => {
+  // CORS — ให้ dashboard (GitHub Pages) เรียกได้
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET');
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       version: BOT_VERSION, equity: accountEquity, trades: trades.length,
       position: position ? position.dir : null, halted
     }));
+  } else if (req.url === '/dashboard') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(buildDashboardData()));
   } else { res.writeHead(404); res.end(); }
-}).listen(PORT, () => console.log(`ETH Turtle Pro health :${PORT}`));
+}).listen(PORT, () => console.log(`ETH Turtle Pro server :${PORT} (/health /dashboard)`));
 
 // ═══════════════ STARTUP ═══════════════
 loadState();
 console.log(`🐢 ETH Turtle Pro ${BOT_VERSION} — D${ENTRY_PERIOD}/exit${EXIT_PERIOD}/trail${TRAIL_ATR}`);
-console.log(`Risk ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity}`);
-tg(`🐢 <b>ETH Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\nStrategy: D40 breakout + trail ATR×3 + exit D20\nRisk: ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}%\nEquity: $${accountEquity}\n\n⚠️ PAPER MODE (ยังไม่ส่ง order จริง)`);
+console.log(`Risk ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity} | Mode: ${live.modeLabel()}`);
+// ตั้ง leverage ถ้า live
+if (live.isEnabled()) { live.setLeverage(); }
+const modeWarning = live.isEnabled()
+  ? `\n\n🔴 <b>LIVE MODE: ${live.modeLabel()}</b> — ส่ง order จริง!`
+  : `\n\n⚠️ PAPER MODE (ยังไม่ส่ง order จริง)`;
+tg(`🐢 <b>ETH Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\nStrategy: D40 breakout + trail ATR×3 + exit D20\nRisk: ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}%\nEquity: $${accountEquity}${modeWarning}`);
 
 // loop ทุก 5 นาที (1h timeframe — เช็คถี่กว่าเพื่อจับ breakout ทันที)
 checkSignal();
