@@ -535,14 +535,16 @@ function buildDashboardData() {
 http.createServer((req, res) => {
   // CORS — ให้ dashboard (GitHub Pages) เรียกได้
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET');
-  if (req.url === '/health') {
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'ngrok-skip-browser-warning, Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  if (req.url.split('?')[0] === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       version: BOT_VERSION, equity: accountEquity, trades: trades.length,
       position: position ? position.dir : null, halted
     }));
-  } else if (req.url === '/dashboard') {
+  } else if (req.url.split('?')[0] === '/dashboard') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(buildDashboardData()));
   } else { res.writeHead(404); res.end(); }

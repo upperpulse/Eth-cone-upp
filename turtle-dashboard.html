@@ -375,7 +375,7 @@ function mapApiData(d){
 async function loadLive(){
   if(!API_URL){ render(); return; } // demo
   try{
-    const r=await fetch(API_URL.replace(/\/$/,'')+'/dashboard',{headers:{'ngrok-skip-browser-warning':'true'}});
+    const r=await fetch(API_URL.replace(/\/$/,'')+'/dashboard?ngrok-skip-browser-warning=true');
     const d=await r.json();
     mapApiData(d);
     document.getElementById('liveStatus').innerHTML='<span class="pulse"></span>live · '+new Date().toLocaleTimeString();
