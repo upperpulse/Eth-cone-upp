@@ -67,13 +67,18 @@ body{
   font-size:13px;font-weight:600;letter-spacing:0.03em;
 }
 .mode-badge .dot{width:8px;height:8px;border-radius:50%;background:var(--bark-soft);box-shadow:0 0 0 3px rgba(138,113,88,0.18)}
-.mode-badge.paper .dot{background:var(--shell-dark);box-shadow:0 0 0 3px rgba(168,137,94,0.25);animation:breathe 2.5s ease-in-out infinite}
+.mode-badge.paper .dot{background:var(--moss);box-shadow:0 0 0 3px rgba(122,139,111,0.3);animation:breathe 2.5s ease-in-out infinite}
 .mode-badge.live .dot{background:var(--clay);box-shadow:0 0 0 3px rgba(176,101,74,0.3)}
 @keyframes breathe{0%,100%{opacity:1}50%{opacity:0.45}}
 .equity-head{text-align:right}
 .equity-head .lbl{font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--bark-soft)}
 .equity-head .val{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;color:var(--bark);line-height:1.1}
 .equity-head .chg{font-size:13px;font-weight:600}
+.price-head{text-align:right;padding-right:18px;border-right:1px solid var(--line);margin-right:2px}
+.price-head .lbl{font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--bark-soft)}
+.price-head .val{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;color:var(--bark);line-height:1.1}
+.price-head .updated{font-size:11px;color:var(--moss);font-weight:600;margin-top:2px}
+.price-head .updated::before{content:'● ';font-size:9px}
 .up{color:var(--moss)}.down{color:var(--clay)}
 
 /* ── GRID ── */
@@ -212,6 +217,11 @@ tr:hover td{background:rgba(196,168,120,0.07)}
     </div>
     <div class="topbar-right">
       <div class="mode-badge paper" id="modeBadge"><span class="dot"></span><span id="modeText">PAPER</span></div>
+      <div class="price-head">
+        <div class="lbl">ETH/USDT</div>
+        <div class="val mono" id="ethPrice">$—</div>
+        <div class="updated" id="updatedAt">—</div>
+      </div>
       <div class="equity-head">
         <div class="lbl">Equity</div>
         <div class="val mono" id="equityVal">$967.25</div>
@@ -467,6 +477,13 @@ function render(){
   $('mlProgress').style.width=Math.min(100,(STATE.mlCount/30)*100)+'%';
 
   drawChannel();
+
+  // ราคา ETH ปัจจุบัน (จาก channel) + เวลาอัพเดต
+  if (STATE.channel && STATE.channel.price) {
+    $('ethPrice').textContent = '$' + fmt(STATE.channel.price);
+  }
+  const now = new Date();
+  $('updatedAt').textContent = 'อัพเดต ' + now.toLocaleTimeString('th-TH', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
 
 // ═══════════ DONCHIAN CHANNEL VIZ (signature) ═══════════
