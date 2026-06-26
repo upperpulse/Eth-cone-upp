@@ -79,6 +79,7 @@ body{
 .price-head .val{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;color:var(--bark);line-height:1.1}
 .price-head .updated{font-size:11px;color:var(--moss);font-weight:600;margin-top:2px}
 .price-head .updated::before{content:'● ';font-size:9px}
+.price-head .countdown{font-size:10px;color:var(--bark-soft);margin-top:1px;font-family:'JetBrains Mono',monospace}
 .up{color:var(--moss)}.down{color:var(--clay)}
 
 /* ── GRID ── */
@@ -221,6 +222,7 @@ tr:hover td{background:rgba(196,168,120,0.07)}
         <div class="lbl">ETH/USDT</div>
         <div class="val mono" id="ethPrice">$—</div>
         <div class="updated" id="updatedAt">—</div>
+        <div class="countdown" id="countdown">รีเฟรชใน 5s</div>
       </div>
       <div class="equity-head">
         <div class="lbl">Equity</div>
@@ -336,7 +338,7 @@ tr:hover td{background:rgba(196,168,120,0.07)}
     <button class="btn" disabled>Connect Binance · locked</button>
   </div>
 
-  <div class="foot"><span id="liveStatus"><span class="pulse"></span>Binance Futures Public API · paper trade · refreshes every 30s</span></div>
+  <div class="foot"><span id="liveStatus"><span class="pulse"></span>Binance Futures Public API · paper trade · refreshes every 5s</span></div>
 
 </div>
 
@@ -529,7 +531,23 @@ function drawChannel(){
 render();
 loadLive();
 // auto-refresh ทุก 30 วิ (ถ้าตั้ง API_URL)
-if(API_URL) setInterval(loadLive, 30000);
+// auto-refresh ทุก 5 วิ + countdown
+let countdown = 5;
+if(API_URL){
+  setInterval(loadLive, 5000);
+  setInterval(()=>{
+    countdown--;
+    if(countdown<=0) countdown=5;
+    const cd=document.getElementById('countdown');
+    if(cd) cd.textContent='รีเฟรชใน '+countdown+'s';
+  }, 1000);
+}
+// reset countdown เมื่อ load สำเร็จ
+const _origLoad = loadLive;
+loadLive = async function(){ await _origLoad(); countdown=5; };
+// refresh ทันทีเมื่อกลับมาดู tab (มือถือพัก background)
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && API_URL) loadLive(); });
+window.addEventListener('focus', ()=>{ if(API_URL) loadLive(); });
 
 </script>
 </body>
