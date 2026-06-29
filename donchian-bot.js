@@ -561,9 +561,9 @@ const modeWarning = live.isEnabled()
   : `\n\n⚠️ PAPER MODE (ยังไม่ส่ง order จริง)`;
 tg(`🐢 <b>ETH Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\nStrategy: D40 breakout + trail ATR×3 + exit D20\nRisk: ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}%\nEquity: $${accountEquity}${modeWarning}`);
 
-// loop ทุก 5 นาที (1h timeframe — เช็คถี่กว่าเพื่อจับ breakout ทันที)
+// loop ทุก 1 นาที (paper แม่นขึ้น — ข้าม SL น้อยลง, ใกล้ live)
 checkSignal();
-setInterval(checkSignal, 5 * 60 * 1000);
+setInterval(checkSignal, 60 * 1000);
 setInterval(pollTelegram, 3000);
 setInterval(saveState, 60 * 1000);
 
