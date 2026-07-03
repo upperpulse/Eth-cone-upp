@@ -124,6 +124,7 @@ body{
 .channel-svg{width:100%;height:100%;overflow:visible}
 .ch-label{font-family:'JetBrains Mono',monospace;font-size:11px;fill:var(--bark-soft)}
 .ch-price-tag{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700}
+.ch-mark-label{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600}
 .channel-legend{display:flex;gap:18px;margin-top:14px;flex-wrap:wrap}
 .leg{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--bark-soft)}
 .leg .swatch{width:16px;height:3px;border-radius:2px}
@@ -525,7 +526,40 @@ function drawChannel(){
     <circle cx="${lastX}" cy="${prY}" r="5" fill="var(--bark)"/>
     <circle cx="${lastX}" cy="${prY}" r="9" fill="none" stroke="var(--bark)" stroke-width="1.5" opacity="0.3"/>
     <text x="${lastX-8}" y="${prY-12}" text-anchor="end" class="ch-price-tag" fill="var(--bark)">$${fmt(c.price,0)}</text>
+    ${drawPositionMarks(Y, W, padX)}
   `;
+}
+
+// mark จุด entry + SL บน channel (เมื่อมี position)
+function drawPositionMarks(Y, W, padX){
+  const p = STATE.position;
+  if(!p) return '';
+  const isLong = p.dir === 'long';
+  const col = isLong ? 'var(--moss)' : 'var(--clay)';
+  let out = '';
+  // ── Entry line + marker ──
+  if(p.entry){
+    const eY = Y(p.entry);
+    out += `
+      <line x1="${padX}" y1="${eY.toFixed(1)}" x2="${W-padX}" y2="${eY.toFixed(1)}" stroke="${col}" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.75"/>
+      <circle cx="${padX+8}" cy="${eY.toFixed(1)}" r="4" fill="${col}"/>
+      <text x="${padX+18}" y="${(eY+4).toFixed(1)}" class="ch-mark-label" fill="${col}">${isLong?'▲':'▼'} Entry $${fmt(p.entry,0)}</text>`;
+  }
+  // ── SL line + marker ──
+  if(p.sl){
+    const sY = Y(p.sl);
+    out += `
+      <line x1="${padX}" y1="${sY.toFixed(1)}" x2="${W-padX}" y2="${sY.toFixed(1)}" stroke="var(--clay)" stroke-width="1.5" stroke-dasharray="2 3" opacity="0.6"/>
+      <text x="${W-padX-4}" y="${(sY-5).toFixed(1)}" text-anchor="end" class="ch-mark-label" fill="var(--clay)">🛑 SL $${fmt(p.sl,0)}</text>`;
+  }
+  // ── Peak marker (จุดกำไรสูงสุด) ──
+  if(p.peak && p.peak !== p.entry){
+    const pkY = Y(p.peak);
+    out += `
+      <line x1="${padX}" y1="${pkY.toFixed(1)}" x2="${W-padX}" y2="${pkY.toFixed(1)}" stroke="var(--shell-dark)" stroke-width="1" stroke-dasharray="1 4" opacity="0.5"/>
+      <text x="${W-padX-4}" y="${(pkY-5).toFixed(1)}" text-anchor="end" class="ch-mark-label" fill="var(--shell-dark)" opacity="0.8">peak $${fmt(p.peak,0)}</text>`;
+  }
+  return out;
 }
 
 render();
