@@ -16,12 +16,12 @@ catch (e) { live = { isEnabled: () => false, modeLabel: () => 'PAPER', openLive:
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
 const BINANCE   = 'https://fapi.binance.com';
-const STATE_FILE  = '/home/ubuntu/eth-bot/donchian_state.json';
-const TRADES_FILE = '/home/ubuntu/eth-bot/donchian_trades.json';
-const SIGNAL_LOG  = '/home/ubuntu/eth-bot/donchian_signals.csv';   // ทุกการเช็ค (วิเคราะห์ภายหลัง)
-const EQUITY_LOG  = '/home/ubuntu/eth-bot/donchian_equity.csv';    // equity snapshot รายวัน
-const TRADE_CSV   = '/home/ubuntu/eth-bot/donchian_trades.csv';    // trade log อ่านง่าย
-const ML_LOG      = '/home/ubuntu/eth-bot/turtle_ml.jsonl';        // ML dataset (feature+ผล สำหรับ train model)
+const STATE_FILE  = '/root/eth-bot/donchian_state.json';
+const TRADES_FILE = '/root/eth-bot/donchian_trades.json';
+const SIGNAL_LOG  = '/root/eth-bot/donchian_signals.csv';   // ทุกการเช็ค (วิเคราะห์ภายหลัง)
+const EQUITY_LOG  = '/root/eth-bot/donchian_equity.csv';    // equity snapshot รายวัน
+const TRADE_CSV   = '/root/eth-bot/donchian_trades.csv';    // trade log อ่านง่าย
+const ML_LOG      = '/root/eth-bot/turtle_ml.jsonl';        // ML dataset (feature+ผล สำหรับ train model)
 
 // ── STRATEGY PARAMETERS (พิสูจน์จาก backtest 4.3 ปี) ──
 const SYMBOL        = 'ETHUSDT';
