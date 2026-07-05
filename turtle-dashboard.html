@@ -273,7 +273,7 @@ tr:hover td{background:rgba(196,168,120,0.07)}
 
   <!-- METRICS -->
   <div class="grid metrics">
-    <div class="metric"><div class="k">Win Rate</div><div class="v" id="mWR">17%</div><div class="note">1W / 5L</div></div>
+    <div class="metric"><div class="k">Win Rate</div><div class="v" id="mWR">—</div><div class="note" id="mWL">— W / — L</div></div>
     <div class="metric"><div class="k">Kelly</div><div class="v" id="mKelly">—</div><div class="note">edge size</div></div>
     <div class="metric"><div class="k">Payoff</div><div class="v" id="mPayoff">0.74</div><div class="note">avg W / avg L</div></div>
     <div class="metric"><div class="k">Avg R</div><div class="v" id="mR">−0.30</div><div class="note">per trade</div></div>
@@ -432,7 +432,11 @@ function render(){
 
   // metrics
   const s=STATE.stats;
-  $('mWR').textContent=s.wr+'%';
+  $('mWR').textContent=s.trades>0 ? s.wr+'%' : '—';
+  // นับ W/L จาก trades จริง
+  const wins=(STATE.trades||[]).filter(t=>t.pnl>0).length;
+  const losses=(STATE.trades||[]).filter(t=>t.pnl<=0).length;
+  $('mWL').textContent=`${wins}W / ${losses}L`;
   $('mKelly').textContent=s.kelly==null?'—':(s.kelly>0?'+':'')+s.kelly+'%';
   $('mPayoff').textContent=fmt(s.payoff,2);
   $('mR').textContent=(s.avgR>=0?'+':'−')+Math.abs(s.avgR).toFixed(2);
