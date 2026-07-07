@@ -5,7 +5,7 @@
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง (พิสูจน์ก่อน)
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v1.0';
+const BOT_VERSION = 'v1.1';
 const fs   = require('fs');
 const http = require('http');
 // Binance live module (ปิดไว้ default — paper)
@@ -169,7 +169,8 @@ async function checkSignal() {
   logEquitySnapshot();   // snapshot รายวัน (วิเคราะห์ drawdown ภายหลัง)
 
   let kl;
-  try { kl = await fetchKlines(ENTRY_PERIOD + ATR_PERIOD + 5); }
+  // ดึง 110 แท่ง — พอสำหรับ Donchian40 + ATR14 + tradesSurge SMA100 (indicator ใหม่)
+  try { kl = await fetchKlines(Math.max(ENTRY_PERIOD + ATR_PERIOD + 5, 110)); }
   catch (e) { console.error('fetch:', e.message); return; }
   if (!Array.isArray(kl) || kl.length < ENTRY_PERIOD + 2) return;
 
@@ -263,13 +264,22 @@ async function openPosition(dir, entry, atr, kl, entryHigh, entryLow) {
 
   // ML features ตอน entry (เก็บไว้ train model อนาคต)
   const cls = kl.map(k => +k[4]);
+  // ── TRADES SURGE (indicator ใหม่จาก basket test) ──
+  // SMA(trades,5)/SMA(trades,100) — วัดความคึกคักของดีล (order flow)
+  // basket test: >=2.0 กรอง fakeout, กำไร+96% DD-54% (OOS+walk-forward ผ่าน)
+  // ตอนนี้ LOG อย่างเดียว (ไม่กรอง) — เก็บ data เทียบก่อนเปิดใช้จริง
+  const tradesArr = kl.map(k => +k[8]); // field [8] = number of trades
+  const smaN = (arr, n) => arr.length >= n ? arr.slice(-n).reduce((s,x)=>s+x,0)/n : null;
+  const ts5 = smaN(tradesArr, 5), ts100 = smaN(tradesArr, 100);
+  const tradesSurge = (ts5 && ts100) ? +(ts5 / ts100).toFixed(3) : null;
   const features = {
     rsi: +calcRSI(cls).toFixed(2),
     obvSlope: +calcOBVSlope(kl).toFixed(0),
     atrPct: +(atr / entry * 100).toFixed(3),       // ATR เป็น % ของราคา (volatility)
     breakoutStrength: +(Math.abs(entry - (dir==='long'?entryHigh:entryLow)) / atr).toFixed(3), // ทะลุแรงแค่ไหน (×ATR)
     channelWidth: +((entryHigh - entryLow) / entry * 100).toFixed(2), // กว้างของ channel (%)
-    momentum: +((cls[cls.length-1] - cls[cls.length-6]) / cls[cls.length-6] * 100).toFixed(2) // momentum 5 แท่ง
+    momentum: +((cls[cls.length-1] - cls[cls.length-6]) / cls[cls.length-6] * 100).toFixed(2), // momentum 5 แท่ง
+    tradesSurge  // indicator ใหม่ — จะดูว่า trade ที่ surge>=2 เป็น winner บ่อยกว่ามั้ย (paper validate)
   };
 
   const riskAmt = Math.abs(entry - sl) * qty;
