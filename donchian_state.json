@@ -1,1 +1,1 @@
-{"position":null,"accountEquity":945.7386953081991,"peakEquity":1013.4866266970727,"halted":false}
+{"position":{"dir":"long","entry":1836.47,"sl":1803.7857142857142,"peak":1839.31,"trough":1831.51,"qty":0.5630833432982375,"bars":0,"atr":11.197142857142873,"initialSL":1802.8785714285714,"riskAmt":18.914773906163983,"entryTs":1783901464114,"features":{"rsi":73.5,"obvSlope":16732,"atrPct":0.61,"breakoutStrength":0.995,"channelWidth":2.1,"momentum":0.87,"tradesSurge":1.013}},"accountEquity":945.7386953081991,"peakEquity":1013.4866266970727,"halted":false}
