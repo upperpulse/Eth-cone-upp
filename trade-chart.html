@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ETH Turtle Pro — Trade Chart</title>
+<style>
+  :root{
+    --bark:#3d2f24; --bark-soft:#6b5544; --moss:#5c7a4a; --moss-dark:#3f5632;
+    --clay:#b5543a; --clay-soft:#c87a5f; --shell:#f0e9de; --shell-dark:#ded3c3;
+    --paper:#faf6ef; --gold:#c9a24b;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,'Segoe UI',sans-serif;background:var(--paper);color:var(--bark);padding:12px;font-size:14px}
+  .wrap{max-width:1100px;margin:0 auto}
+  h1{font-size:18px;margin-bottom:2px;color:var(--bark)}
+  .sub{font-size:12px;color:var(--bark-soft);margin-bottom:14px}
+  .live{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--moss-dark);margin-left:8px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--moss);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .panel{background:var(--shell);border:1px solid var(--shell-dark);border-radius:14px;padding:16px;margin-bottom:14px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  .stat{background:var(--shell);border:1px solid var(--shell-dark);border-radius:12px;padding:12px}
+  .stat .k{font-size:11px;color:var(--bark-soft);margin-bottom:3px}
+  .stat .v{font-size:20px;font-weight:700}
+  .green{color:var(--moss-dark)} .red{color:var(--clay)}
+  svg{width:100%;height:auto;display:block}
+  .mono{font-family:'JetBrains Mono','Courier New',monospace}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-top:10px;color:var(--bark-soft)}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .sw{width:14px;height:3px;border-radius:2px;display:inline-block}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+  th,td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--shell-dark)}
+  th{color:var(--bark-soft);font-weight:600;font-size:11px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  tr.win td{background:rgba(92,122,74,.06)}
+  tr.loss td{background:rgba(181,84,58,.05)}
+  .badge{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:600}
+  .b-long{background:rgba(92,122,74,.18);color:var(--moss-dark)}
+  .b-short{background:rgba(181,84,58,.18);color:var(--clay)}
+  .err{color:var(--clay);font-size:13px;padding:20px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🐢 ETH Turtle Pro — Trade Chart <span class="live"><span class="dot"></span><span id="liveT">โหลด...</span></span></h1>
+  <div class="sub">การเข้า/ออกทุกรอบ บนกราฟราคา ETH · Donchian breakout + trail ATR×3</div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="panel">
+    <div id="chartBox"><div class="err">กำลังโหลดข้อมูล...</div></div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--bark)"></span> ราคา ETH</span>
+      <span>▲ เข้า LONG</span>
+      <span>▼ เข้า SHORT</span>
+      <span>● ออก (กำไร <span class="green">เขียว</span> / ขาดทุน <span class="red">แดง</span>)</span>
+      <span style="color:var(--moss-dark)">━ trade กำไร</span>
+      <span style="color:var(--clay)">┈ trade ขาดทุน</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div style="font-size:13px;font-weight:600;margin-bottom:4px">ตารางเทรด</div>
+    <table id="tbl"></table>
+  </div>
+</div>
+
+<script>
+const API = 'https://upcountry-tint-unlucky.ngrok-free.dev';
+const fmt = (n,d=2)=>n==null?'—':(+n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+
+async function load(){
+  let trades=[];
+  try{
+    const r = await fetch(API.replace(/\/$/,'')+'/dashboard',{headers:{'ngrok-skip-browser-warning':'true'}});
+    const d = await r.json();
+    trades = d.trades||[];
+    document.getElementById('liveT').textContent = 'live · '+new Date().toLocaleTimeString('th-TH');
+  }catch(e){
+    document.getElementById('chartBox').innerHTML='<div class="err">โหลดข้อมูลไม่ได้ — เช็คว่า bot + ngrok รันอยู่<br><small>'+e.message+'</small></div>';
+    document.getElementById('liveT').textContent='offline';
+    return;
+  }
+  if(!trades.length){
+    document.getElementById('chartBox').innerHTML='<div class="err">ยังไม่มีเทรด</div>';
+    return;
+  }
+  renderStats(trades);
+  renderChart(trades);
+  renderTable(trades);
+}
+
+function renderStats(tr){
+  const wins=tr.filter(t=>t.pnl>0), losses=tr.filter(t=>t.pnl<=0);
+  const net=tr.reduce((s,t)=>s+t.pnl,0);
+  const wr=tr.length?(wins.length/tr.length*100).toFixed(0):0;
+  document.getElementById('stats').innerHTML=`
+    <div class="stat"><div class="k">รอบทั้งหมด</div><div class="v">${tr.length}</div></div>
+    <div class="stat"><div class="k">Win / Loss</div><div class="v">${wins.length}<span style="font-size:14px;color:var(--bark-soft)"> / ${losses.length}</span></div></div>
+    <div class="stat"><div class="k">Win Rate</div><div class="v">${wr}%</div></div>
+    <div class="stat"><div class="k">Net PnL</div><div class="v ${net>=0?'green':'red'}">${net>=0?'+':''}$${fmt(net)}</div></div>`;
+}
+
+function renderChart(tr){
+  const W=1040, H=440, padL=58, padR=20, padT=20, padB=52;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+
+  // เรียงตามเวลา — ใช้ entryTs ถ้ามี ไม่งั้นใช้ลำดับ
+  const hasTime = tr.every(t=>t.entryTs);
+  tr = [...tr].sort((a,b)=> hasTime ? a.entryTs-b.entryTs : a.n-b.n);
+
+  // แกน X: เวลา (หรือลำดับ trade), แกน Y: ราคา
+  // สร้าง timeline points จาก entry+exit ทุก trade
+  const pts=[];
+  tr.forEach(t=>{
+    const et = hasTime ? t.entryTs : t.n*1e7;
+    const xt = hasTime ? (t.exitTs||t.entryTs) : t.n*1e7+5e6;
+    pts.push({x:et, price:t.entry}); pts.push({x:xt, price:t.exit});
+  });
+  const xs=pts.map(p=>p.x), prices=pts.map(p=>p.price);
+  const minX=Math.min(...xs), maxX=Math.max(...xs);
+  let minP=Math.min(...prices), maxP=Math.max(...prices);
+  const pad=(maxP-minP)*0.12||10; minP-=pad; maxP+=pad;
+
+  const X=v=>padL+(maxX>minX?(v-minX)/(maxX-minX):0.5)*plotW;
+  const Y=v=>padT+(1-(v-minP)/(maxP-minP))*plotH;
+
+  let svg=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  // grid Y (ราคา)
+  const ticks=5;
+  for(let i=0;i<=ticks;i++){
+    const p=minP+(maxP-minP)*i/ticks, y=Y(p);
+    svg+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#ded3c3" stroke-width="1"/>`;
+    svg+=`<text x="${padL-8}" y="${(y+4).toFixed(1)}" text-anchor="end" class="mono" font-size="11" fill="#6b5544">$${fmt(p,0)}</text>`;
+  }
+
+  // เส้นราคา (ต่อ entry→exit ของแต่ละ trade + เชื่อม exit→entry ถัดไป)
+  let pricePath='';
+  pts.forEach((p,i)=>{ pricePath += (i===0?'M':'L')+X(p.x).toFixed(1)+' '+Y(p.price).toFixed(1)+' '; });
+  svg+=`<path d="${pricePath}" fill="none" stroke="#3d2f24" stroke-width="1.4" opacity="0.35" stroke-linejoin="round"/>`;
+
+  // แต่ละ trade: เส้นเชื่อม entry→exit + marker
+  tr.forEach(t=>{
+    const et = hasTime ? t.entryTs : t.n*1e7;
+    const xt = hasTime ? (t.exitTs||t.entryTs) : t.n*1e7+5e6;
+    const x1=X(et), y1=Y(t.entry), x2=X(xt), y2=Y(t.exit);
+    const win=t.pnl>0;
+    const col=win?'#5c7a4a':'#b5543a';
+    // เส้น trade (หนา, ทึบถ้ากำไร / ประถ้าขาดทุน)
+    svg+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="2.5" opacity="0.85" ${win?'':'stroke-dasharray="4 3"'}/>`;
+    // marker เข้า (▲ long / ▼ short)
+    const isLong=t.dir==='long';
+    const entryCol=isLong?'#5c7a4a':'#b5543a';
+    if(isLong) svg+=`<path d="M${x1.toFixed(1)} ${(y1-7).toFixed(1)} l6 10 l-12 0 z" fill="${entryCol}"/>`;
+    else svg+=`<path d="M${x1.toFixed(1)} ${(y1+7).toFixed(1)} l6 -10 l-12 0 z" fill="${entryCol}"/>`;
+    // marker ออก (วงกลม สีตามกำไร)
+    svg+=`<circle cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="4.5" fill="${col}" stroke="#faf6ef" stroke-width="1.5"/>`;
+    // เลข trade
+    svg+=`<text x="${x1.toFixed(1)}" y="${(isLong?y1+18:y1-12).toFixed(1)}" text-anchor="middle" class="mono" font-size="9" fill="#6b5544">#${t.n}</text>`;
+  });
+
+  // แกน X labels (trade แรก/กลาง/ท้าย)
+  if(hasTime){
+    [tr[0], tr[Math.floor(tr.length/2)], tr[tr.length-1]].forEach(t=>{
+      const x=X(t.entryTs);
+      const dt=new Date(t.entryTs);
+      svg+=`<text x="${x.toFixed(1)}" y="${H-padB+22}" text-anchor="middle" class="mono" font-size="10" fill="#6b5544">${dt.getDate()}/${dt.getMonth()+1}</text>`;
+    });
+  }
+
+  svg+=`</svg>`;
+  document.getElementById('chartBox').innerHTML=svg;
+}
+
+function renderTable(tr){
+  let h=`<thead><tr><th>#</th><th>ทิศ</th><th>เข้า</th><th>ออก</th><th>PnL</th><th>R</th><th>ถือ(ชม)</th><th>เหตุ</th></tr></thead><tbody>`;
+  [...tr].reverse().forEach(t=>{
+    const win=t.pnl>0;
+    h+=`<tr class="${win?'win':'loss'}">
+      <td>#${t.n}</td>
+      <td><span class="badge ${t.dir==='long'?'b-long':'b-short'}">${t.dir==='long'?'LONG':'SHORT'}</span></td>
+      <td class="mono">$${fmt(t.entry)}</td>
+      <td class="mono">$${fmt(t.exit)}</td>
+      <td class="mono ${win?'green':'red'}">${win?'+':''}$${fmt(t.pnl)}</td>
+      <td class="mono ${win?'green':'red'}">${t.r>=0?'+':''}${fmt(t.r,2)}</td>
+      <td class="mono">${t.held||'—'}</td>
+      <td style="font-size:10px;color:var(--bark-soft)">${t.reason||'—'}</td>
+    </tr>`;
+  });
+  h+=`</tbody>`;
+  document.getElementById('tbl').innerHTML=h;
+}
+
+load();
+setInterval(load, 15000); // refresh 15s
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
+</script>
+</body>
+</html>
