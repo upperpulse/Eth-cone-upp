@@ -5,7 +5,7 @@
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง (พิสูจน์ก่อน)
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v1.1';
+const BOT_VERSION = 'v1.2';
 const fs   = require('fs');
 const http = require('http');
 // Binance live module (ปิดไว้ default — paper)
@@ -139,12 +139,15 @@ function buildPositionReport(price) {
   const heldH = Math.round((Date.now() - entryTs) / 3600000);
   const slDist = Math.abs(price - sl);
   const locked = dir === 'long' ? (sl > entry) : (sl < entry);   // SL ล็อกกำไรแล้วมั้ย
+  // กำไรขั้นต่ำที่ล็อกไว้ = ถ้าโดน SL ตอนนี้จะได้เท่าไหร่ (หัก fee คร่าวๆ)
+  const lockedGross = dir === 'long' ? (sl - entry) * qty : (entry - sl) * qty;
+  const lockedNet = lockedGross - (entry + sl) * qty * (FEE + SLIP);
   const emoji = floatPnl >= 0 ? '🟢' : '🔴';
   return `${emoji} <b>${dir.toUpperCase()} กำลังถือ</b>\n\n` +
     `Entry $${f(entry)} → ตอนนี้ $${f(price)}\n` +
     `กำไรลอย: $${f(floatPnl)} ${floatPnl>=0?'✅':''}\n` +
     `ถือ: ${heldH}h | peak $${f(peak)}\n` +
-    `SL $${f(sl)} (ห่าง $${f(slDist)}) ${locked ? '🔒 ล็อกกำไรแล้ว' : ''}\n` +
+    `SL $${f(sl)} (ห่าง $${f(slDist)}) ${locked ? `🔒 ล็อกกำไรขั้นต่ำ $${f(lockedNet)}` : ''}\n` +
     `Equity $${f(accountEquity)}`;
 }
 
@@ -320,12 +323,21 @@ async function closePosition(exit, reason) {
   const rMultiple = riskAmt > 0 ? pnl / riskAmt : 0;   // กำไรเป็นกี่เท่าของความเสี่ยง
   const holdH = bars;
 
+  // ── TP+2R SHADOW (paper validate — ไม่เปลี่ยน exit จริง) ──
+  // เทียบ: ถ้ามี Take-Profit ที่ +2R จะเก็บได้เท่าไหร่ vs trail จริง
+  // MFE (peak) บอกว่าเคยกำไรสูงสุดกี่ R — ถ้า MFE >= 2R แปลว่า TP+2R จะโดน (เก็บ +2R พอดี)
+  const mfeR = riskAmt > 0 ? mfe / riskAmt : 0;         // MFE เป็นกี่ R
+  const tp2Hit = mfeR >= 2;                             // ราคาเคยถึง +2R มั้ย (TP จะโดน)
+  const tp2Pnl = tp2Hit ? riskAmt * 2 : pnl;            // ถ้าโดน TP → เก็บ +2R, ไม่โดน → เท่า trail จริง
+  const tp2Diff = +(tp2Pnl - pnl).toFixed(2);          // TP+2R ดีกว่า trail เท่าไหร่ (+ = TP ดีกว่า)
+
   const trade = {
     num: trades.length + 1, dir, entry: +entry.toFixed(2), exit: +exit.toFixed(2),
     qty: +qty.toFixed(4), pnl: +pnl.toFixed(2), reason, bars: holdH,
     mfe: +mfe.toFixed(2), mae: +mae.toFixed(2), rMultiple: +rMultiple.toFixed(2),
     riskAmt: +riskAmt.toFixed(2), atr: +atr.toFixed(2),
     equity: +accountEquity.toFixed(2),
+    tp2Hit, tp2Pnl: +tp2Pnl.toFixed(2), tp2Diff,  // shadow: TP+2R เทียบ trail
     entryTs, exitTs: Date.now()
   };
   trades.push(trade);
@@ -343,6 +355,7 @@ async function closePosition(exit, reason) {
     `${dir.toUpperCase()} $${f(entry)} → $${f(exit)}\n` +
     `PnL: $${f(pnl)} (${rMultiple > 0 ? '+' : ''}${rMultiple.toFixed(2)}R) ${win ? '✅' : ''}\n` +
     `ถือ: ${holdH} ชม. | MFE $${f(mfe)} MAE $${f(mae)}\n` +
+    `📊 TP+2R shadow: ${tp2Hit ? `เก็บ $${f(tp2Pnl)} (${tp2Diff>=0?'+':''}$${f(tp2Diff)} vs trail)` : 'ไม่ถึง +2R (เท่า trail)'}\n` +
     `Equity: $${f(accountEquity)} (peak $${f(peakEquity)})`);
   console.log(`<<< EXIT ${reason} pnl $${f(pnl)} (${rMultiple.toFixed(2)}R) equity $${f(accountEquity)}`);
 
@@ -381,7 +394,8 @@ function logML(features, trade) {
       reason: trade.reason,
       holdHours: trade.bars,
       mfe: trade.mfe,
-      mae: trade.mae
+      mae: trade.mae,
+      tp2Hit: trade.tp2Hit, tp2Pnl: trade.tp2Pnl, tp2Diff: trade.tp2Diff  // TP+2R shadow (paper validate)
     };
     fs.appendFileSync(ML_LOG, JSON.stringify(record) + '\n');
   } catch (e) {}
@@ -563,7 +577,7 @@ http.createServer((req, res) => {
 // ═══════════════ STARTUP ═══════════════
 loadState();
 console.log(`🐢 ETH Turtle Pro ${BOT_VERSION} — D${ENTRY_PERIOD}/exit${EXIT_PERIOD}/trail${TRAIL_ATR}`);
-console.log(`Risk ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity} | Mode: ${live.modeLabel()}`);
+console.log(`Risk ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity.toFixed(2)} | Mode: ${live.modeLabel()}`);
 // ตั้ง leverage ถ้า live
 if (live.isEnabled()) { live.setLeverage(); }
 const modeWarning = live.isEnabled()
