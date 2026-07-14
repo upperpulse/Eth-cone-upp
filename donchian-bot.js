@@ -5,7 +5,7 @@
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง (พิสูจน์ก่อน)
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v1.2';
+const BOT_VERSION = 'v1.3';
 const fs   = require('fs');
 const http = require('http');
 // Binance live module (ปิดไว้ default — paper)
@@ -482,6 +482,22 @@ async function pollTelegram() {
         let price = position ? position.entry : 0;
         try { price = await fetchPrice(); } catch {}
         await tg(buildPositionReport(price));
+      } else if (text === '/close' || text === '/exit') {
+        // สั่งปิด position เอง (manual close ด้วยราคาตลาด)
+        if (!position) {
+          await tg('📍 ไม่มี position ให้ปิด (FLAT อยู่)');
+        } else {
+          await tg(`⚠️ ยืนยันปิด ${position.dir.toUpperCase()} @ $${f(position.entry)}?\n\nพิมพ์ /close_yes เพื่อยืนยัน (ปิดด้วยราคาตลาดทันที)\nหรือปล่อยให้ trail จัดการต่อ`);
+        }
+      } else if (text === '/close_yes') {
+        if (!position) {
+          await tg('📍 ไม่มี position ให้ปิด');
+        } else {
+          let price = position.entry;
+          try { price = await fetchPrice(); } catch {}
+          await closePosition(price, 'MANUAL_CLOSE');
+          await tg('✅ ปิด position เองแล้ว (manual)');
+        }
       } else if (text === '/resume' && halted) {
         halted = false; peakEquity = accountEquity;
         await tg('▶️ Resume — เริ่มเทรดใหม่ (reset peak)');
@@ -549,7 +565,8 @@ function buildDashboardData() {
     trades: trades.map(t => ({
       n: t.num, dir: t.dir, entry: t.entry, exit: t.exit,
       pnl: t.pnl, r: t.rMultiple, reason: t.reason==='DONCHIAN_EXIT'?'DONCHIAN':'TRAIL_SL',
-      held: t.bars, mfe: t.mfe
+      held: t.bars, mfe: t.mfe,
+      entryTs: t.entryTs, exitTs: t.exitTs   // เวลา (สำหรับ chart)
     })),
     channel: dashCache.channel,
     updatedAt: dashCache.updatedAt
