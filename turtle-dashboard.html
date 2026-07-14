@@ -88,6 +88,22 @@ body{
 .grid{display:grid;gap:20px}
 .hero-grid{grid-template-columns:minmax(0,5fr) minmax(0,7fr);margin-bottom:20px}
 @media(max-width:880px){.hero-grid{grid-template-columns:1fr}}
+/* ── มือถือ: header กระชับ ── */
+@media(max-width:560px){
+  .topbar{gap:12px;margin-bottom:18px}
+  .brand-mark{width:42px;height:42px;font-size:22px;border-radius:12px}
+  .brand-name{font-size:20px}
+  .brand-sub{display:none}
+  .topbar-right{gap:12px;width:100%;justify-content:space-between}
+  .mode-badge{padding:5px 11px;font-size:11px}
+  .price-head{padding-right:12px;margin-right:0}
+  .price-head .val,.equity-head .val{font-size:19px}
+  .price-head .lbl,.equity-head .lbl{font-size:10px}
+  .price-head .updated,.price-head .countdown{font-size:9px}
+  .equity-head .chg{font-size:11px}
+  .tabnav{gap:6px;margin-bottom:12px}
+  .tab-btn{padding:9px;font-size:13px}
+}
 
 .card{
   background:var(--cream);
