@@ -13,6 +13,8 @@
   --sand-deep:#DDD1BC;
   --shell:#C4A878;
   --shell-dark:#A8895E;
+  --gold:#C9A24B;
+  --moss-dark:#5c7a4a;
   --bark:#6B5440;
   --bark-soft:#8A7158;
   --moss:#7A8B6F;
@@ -203,6 +205,16 @@ tr:hover td{background:rgba(196,168,120,0.07)}
 .refresh-hint .spin{width:11px;height:11px;border:1.5px solid var(--line-strong);border-top-color:var(--shell-dark);border-radius:50%;animation:rot 1s linear infinite}
 @keyframes rot{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.tabnav{display:flex;gap:8px;margin-bottom:16px}
+.tab-btn{flex:1;padding:11px;border:1px solid var(--shell-dark);border-radius:10px;background:var(--shell);color:var(--bark-soft);font-size:14px;font-weight:600;cursor:pointer;transition:all .15s}
+.tab-btn.active{background:var(--bark);color:var(--paper);border-color:var(--bark)}
+.tab-btn:hover:not(.active){background:var(--shell-dark)}
+#histTbl th,#histTbl td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--shell-dark)}
+#histTbl th{color:var(--bark-soft);font-weight:600;font-size:11px}
+#histTbl th:first-child,#histTbl td:first-child{text-align:left}
+.hbadge{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:600}
+.hb-long{background:rgba(122,139,111,.25);color:var(--moss-dark)}
+.hb-short{background:rgba(181,84,58,.18);color:var(--clay)}
 </style>
 </head>
 <body>
@@ -232,6 +244,15 @@ tr:hover td{background:rgba(196,168,120,0.07)}
       </div>
     </div>
   </header>
+
+  <!-- TAB NAV -->
+  <div class="tabnav">
+    <button class="tab-btn active" data-tab="live" onclick="switchTab('live')">📊 สถานะสด</button>
+    <button class="tab-btn" data-tab="history" onclick="switchTab('history')">📜 ประวัติเทรด</button>
+  </div>
+
+  <!-- ═══ TAB 1: LIVE ═══ -->
+  <div class="tab-content" id="tab-live">
 
   <!-- HERO: POSITION + DONCHIAN -->
   <div class="grid hero-grid">
@@ -338,6 +359,26 @@ tr:hover td{background:rgba(196,168,120,0.07)}
     </div>
     <button class="btn" disabled>Connect Binance · locked</button>
   </div>
+
+  </div><!-- /tab-live -->
+
+  <!-- ═══ TAB 2: HISTORY (กราฟ buy/sell) ═══ -->
+  <div class="tab-content" id="tab-history" style="display:none">
+    <div class="panel" style="background:var(--shell);border:1px solid var(--shell-dark);border-radius:14px;padding:16px;margin-bottom:14px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:2px">กราฟประวัติเทรด — Buy / Sell</div>
+      <div style="font-size:12px;color:var(--bark-soft);margin-bottom:12px">การเข้า/ออกทุกรอบ บนกราฟราคา ETH</div>
+      <div id="histChart"><div style="color:var(--bark-soft);text-align:center;padding:30px">กำลังโหลด...</div></div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;margin-top:10px;color:var(--bark-soft)">
+        <span>▲ เข้า LONG</span><span>▼ เข้า SHORT</span>
+        <span>● ออก (<span style="color:var(--moss)">กำไร</span>/<span style="color:var(--clay)">ขาดทุน</span>)</span>
+        <span style="color:var(--moss)">━ กำไร</span><span style="color:var(--clay)">┈ ขาดทุน</span>
+      </div>
+    </div>
+    <div class="panel" style="background:var(--shell);border:1px solid var(--shell-dark);border-radius:14px;padding:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">ตารางเทรด</div>
+      <table id="histTbl" style="width:100%;border-collapse:collapse;font-size:12px"></table>
+    </div>
+  </div><!-- /tab-history -->
 
   <div class="foot"><span id="liveStatus"><span class="pulse"></span>Binance Futures Public API · paper trade · refreshes every 5s</span></div>
 
@@ -563,11 +604,19 @@ function drawPositionMarks(Y, W, padX){
       <line x1="${padX}" y1="${pkY.toFixed(1)}" x2="${W-padX}" y2="${pkY.toFixed(1)}" stroke="var(--shell-dark)" stroke-width="1" stroke-dasharray="1 4" opacity="0.5"/>
       <text x="${W-padX-4}" y="${(pkY-5).toFixed(1)}" text-anchor="end" class="ch-mark-label" fill="var(--shell-dark)" opacity="0.8">peak $${fmt(p.peak,0)}</text>`;
   }
+  // ── TP+2R line (เป้าราคาขายทำกำไรที่ +2R) ──
+  // risk = ระยะ entry→SL เริ่มต้น; TP+2R = entry + risk×2 (long) / entry − risk×2 (short)
+  if(p.entry && p.sl){
+    const risk = Math.abs(p.entry - p.sl);  // ระยะความเสี่ยง (≈ ATR×3 ตอนเข้า)
+    const tp2 = isLong ? p.entry + risk*2 : p.entry - risk*2;
+    const tY = Y(tp2);
+    const reached = isLong ? (p.price >= tp2) : (p.price <= tp2);
+    out += `
+      <line x1="${padX}" y1="${tY.toFixed(1)}" x2="${W-padX}" y2="${tY.toFixed(1)}" stroke="var(--gold)" stroke-width="1.5" stroke-dasharray="6 3" opacity="0.85"/>
+      <text x="${padX+18}" y="${(tY-5).toFixed(1)}" class="ch-mark-label" fill="var(--gold)">🎯 TP +2R $${fmt(tp2,0)}${reached?' ✓ ถึงแล้ว':''}</text>`;
+  }
   return out;
 }
-
-render();
-loadLive();
 // auto-refresh ทุก 30 วิ (ถ้าตั้ง API_URL)
 // auto-refresh ทุก 5 วิ + countdown
 let countdown = 5;
@@ -586,6 +635,54 @@ loadLive = async function(){ await _origLoad(); countdown=5; };
 // refresh ทันทีเมื่อกลับมาดู tab (มือถือพัก background)
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && API_URL) loadLive(); });
 window.addEventListener('focus', ()=>{ if(API_URL) loadLive(); });
+
+// ═══════════ TABS ═══════════
+function switchTab(tab){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.getElementById('tab-live').style.display = tab==='live'?'':'none';
+  document.getElementById('tab-history').style.display = tab==='history'?'':'none';
+  if(tab==='history') renderHistory();
+}
+
+// ═══════════ HISTORY CHART (buy/sell) ═══════════
+function renderHistory(){
+  const tr = STATE.trades||[];
+  if(!tr.length){ document.getElementById('histChart').innerHTML='<div style="color:var(--bark-soft);text-align:center;padding:30px">ยังไม่มีเทรด</div>'; document.getElementById('histTbl').innerHTML=''; return; }
+
+  const W=1000,H=420,padL=56,padR=18,padT=18,padB=48, plotW=W-padL-padR, plotH=H-padT-padB;
+  const hasTime = tr.every(t=>t.entryTs);
+  const S=[...tr].sort((a,b)=> hasTime ? a.entryTs-b.entryTs : a.n-b.n);
+  const pts=[];
+  S.forEach(t=>{ const e=hasTime?t.entryTs:t.n*1e7, x=hasTime?(t.exitTs||t.entryTs):t.n*1e7+5e6; pts.push({x:e,p:t.entry}); pts.push({x,p:t.exit}); });
+  const xs=pts.map(p=>p.x), ps=pts.map(p=>p.p);
+  const minX=Math.min(...xs),maxX=Math.max(...xs); let minP=Math.min(...ps),maxP=Math.max(...ps);
+  const pd=(maxP-minP)*0.12||10; minP-=pd; maxP+=pd;
+  const X=v=>padL+(maxX>minX?(v-minX)/(maxX-minX):.5)*plotW;
+  const Y=v=>padT+(1-(v-minP)/(maxP-minP))*plotH;
+
+  let s=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">`;
+  for(let i=0;i<=5;i++){ const p=minP+(maxP-minP)*i/5,y=Y(p); s+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#A8895E" stroke-width="1" opacity="0.3"/><text x="${padL-8}" y="${(y+4).toFixed(1)}" text-anchor="end" class="mono" font-size="11" fill="#6b5544">$${fmt(p,0)}</text>`; }
+  let path=''; pts.forEach((p,i)=>{ path+=(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.p).toFixed(1)+' '; });
+  s+=`<path d="${path}" fill="none" stroke="#3d2f24" stroke-width="1.3" opacity="0.3"/>`;
+  S.forEach(t=>{
+    const e=hasTime?t.entryTs:t.n*1e7, x=hasTime?(t.exitTs||t.entryTs):t.n*1e7+5e6;
+    const x1=X(e),y1=Y(t.entry),x2=X(x),y2=Y(t.exit),win=t.pnl>0,col=win?'#5c7a4a':'#b5543a',isL=t.dir==='long';
+    s+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="2.5" opacity="0.85" ${win?'':'stroke-dasharray="4 3"'}/>`;
+    if(isL) s+=`<path d="M${x1.toFixed(1)} ${(y1-7).toFixed(1)} l6 10 l-12 0 z" fill="#5c7a4a"/>`;
+    else s+=`<path d="M${x1.toFixed(1)} ${(y1+7).toFixed(1)} l6 -10 l-12 0 z" fill="#b5543a"/>`;
+    s+=`<circle cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="4.5" fill="${col}" stroke="#faf6ef" stroke-width="1.5"/>`;
+    s+=`<text x="${x1.toFixed(1)}" y="${(isL?y1+18:y1-12).toFixed(1)}" text-anchor="middle" class="mono" font-size="9" fill="#6b5544">#${t.n}</text>`;
+  });
+  s+=`</svg>`;
+  document.getElementById('histChart').innerHTML=s;
+
+  // ตาราง
+  let h=`<thead><tr><th>#</th><th>ทิศ</th><th>เข้า</th><th>ออก</th><th>PnL</th><th>R</th></tr></thead><tbody>`;
+  [...S].reverse().forEach(t=>{ const win=t.pnl>0;
+    h+=`<tr><td>#${t.n}</td><td><span class="hbadge ${t.dir==='long'?'hb-long':'hb-short'}">${t.dir==='long'?'LONG':'SHORT'}</span></td><td class="mono">$${fmt(t.entry)}</td><td class="mono">$${fmt(t.exit)}</td><td class="mono" style="color:${win?'#5c7a4a':'#b5543a'}">${win?'+':''}$${fmt(t.pnl)}</td><td class="mono" style="color:${win?'#5c7a4a':'#b5543a'}">${t.r>=0?'+':''}${fmt(t.r,2)}</td></tr>`;
+  });
+  document.getElementById('histTbl').innerHTML=h+'</tbody>';
+}
 
 </script>
 </body>
