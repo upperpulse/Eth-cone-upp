@@ -103,6 +103,9 @@ body{
   .equity-head .chg{font-size:11px}
   .tabnav{gap:6px;margin-bottom:12px}
   .tab-btn{padding:9px;font-size:13px}
+  #histTbl{font-size:11px}
+  #histTbl th,#histTbl td{padding:6px 5px}
+  #histTbl .hbadge{padding:1px 5px;font-size:9px}
 }
 
 .card{
@@ -388,11 +391,14 @@ tr:hover td{background:rgba(196,168,120,0.07)}
         <span>▲ เข้า LONG</span><span>▼ เข้า SHORT</span>
         <span>● ออก (<span style="color:var(--moss)">กำไร</span>/<span style="color:var(--clay)">ขาดทุน</span>)</span>
         <span style="color:var(--moss)">━ กำไร</span><span style="color:var(--clay)">┈ ขาดทุน</span>
+        <span style="color:#2b6cb0;font-weight:600">◆ ราคาสูงสุดที่เคยถึง (ไม่ได้ปิด)</span>
       </div>
     </div>
     <div class="panel" style="background:var(--shell);border:1px solid var(--shell-dark);border-radius:14px;padding:16px">
       <div style="font-size:13px;font-weight:600;margin-bottom:6px">ตารางเทรด</div>
-      <table id="histTbl" style="width:100%;border-collapse:collapse;font-size:12px"></table>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <table id="histTbl" style="width:100%;border-collapse:collapse;font-size:12px;min-width:340px"></table>
+      </div>
     </div>
   </div><!-- /tab-history -->
 
@@ -555,8 +561,16 @@ function drawChannel(){
   const c=STATE.channel, svg=$('channelSvg');
   const W=600,H=240,padX=12,padY=20;
   const all=[c.upper,c.lower,c.price,...c.history];
+  // รวม entry/SL/peak/TP+2R เข้าช่วงแกน Y ด้วย (กันเส้นทะลุนอกกราฟ)
+  const p=STATE.position;
+  if(p){
+    if(p.entry) all.push(p.entry);
+    if(p.sl) all.push(p.sl);
+    if(p.peak) all.push(p.peak);
+    if(p.entry && p.sl){ const risk=Math.abs(p.entry-p.sl); all.push(p.dir==='long'?p.entry+risk*2:p.entry-risk*2); } // TP+2R
+  }
   const hi=Math.max(...all),lo=Math.min(...all),rng=(hi-lo)||1;
-  const pad=rng*0.12;
+  const pad=rng*0.10;
   const yMax=hi+pad,yMin=lo-pad,yRng=yMax-yMin;
   const Y=(price)=>padY+(1-(price-yMin)/yRng)*(H-padY*2);
   const n=c.history.length;
@@ -669,7 +683,7 @@ function renderHistory(){
   const hasTime = tr.every(t=>t.entryTs);
   const S=[...tr].sort((a,b)=> hasTime ? a.entryTs-b.entryTs : a.n-b.n);
   const pts=[];
-  S.forEach(t=>{ const e=hasTime?t.entryTs:t.n*1e7, x=hasTime?(t.exitTs||t.entryTs):t.n*1e7+5e6; pts.push({x:e,p:t.entry}); pts.push({x,p:t.exit}); });
+  S.forEach(t=>{ const e=hasTime?t.entryTs:t.n*1e7, x=hasTime?(t.exitTs||t.entryTs):t.n*1e7+5e6; pts.push({x:e,p:t.entry}); pts.push({x,p:t.exit}); if(t.peakPrice) pts.push({x,p:t.peakPrice}); });
   const xs=pts.map(p=>p.x), ps=pts.map(p=>p.p);
   const minX=Math.min(...xs),maxX=Math.max(...xs); let minP=Math.min(...ps),maxP=Math.max(...ps);
   const pd=(maxP-minP)*0.12||10; minP-=pd; maxP+=pd;
@@ -684,6 +698,12 @@ function renderHistory(){
     const e=hasTime?t.entryTs:t.n*1e7, x=hasTime?(t.exitTs||t.entryTs):t.n*1e7+5e6;
     const x1=X(e),y1=Y(t.entry),x2=X(x),y2=Y(t.exit),win=t.pnl>0,col=win?'#5c7a4a':'#b5543a',isL=t.dir==='long';
     s+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="2.5" opacity="0.85" ${win?'':'stroke-dasharray="4 3"'}/>`;
+    // ── peak (ราคาสูงสุดที่เคยไปถึง แต่ไม่ปิด) ── ◇ ทอง + เส้นประบางจาก peak ลงมา exit
+    if(t.peakPrice && Math.abs(t.peakPrice - t.exit) > 0.5){
+      const px=x2, py=Y(t.peakPrice);  // peak เกิดช่วงถือ — วางที่เวลา exit (จุดสูงสุด)
+      s+=`<line x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#2b6cb0" stroke-width="1.2" stroke-dasharray="2 2" opacity="0.7"/>`;
+      s+=`<path d="M${px.toFixed(1)} ${(py-6).toFixed(1)} l6 6 l-6 6 l-6 -6 z" fill="#2b6cb0" stroke="#faf6ef" stroke-width="1.5"/>`;
+    }
     if(isL) s+=`<path d="M${x1.toFixed(1)} ${(y1-7).toFixed(1)} l6 10 l-12 0 z" fill="#5c7a4a"/>`;
     else s+=`<path d="M${x1.toFixed(1)} ${(y1+7).toFixed(1)} l6 -10 l-12 0 z" fill="#b5543a"/>`;
     s+=`<circle cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="4.5" fill="${col}" stroke="#faf6ef" stroke-width="1.5"/>`;
