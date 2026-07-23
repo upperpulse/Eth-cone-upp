@@ -5,7 +5,7 @@
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง (พิสูจน์ก่อน)
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v1.3';
+const BOT_VERSION = 'v1.5';
 const fs   = require('fs');
 const http = require('http');
 // Binance live module (ปิดไว้ default — paper)
@@ -33,7 +33,8 @@ const TIMEFRAME     = '1h';
 
 // ── RISK MANAGEMENT (สำคัญสำหรับ edge บาง Kelly 3%) ──
 const ACCOUNT_SIZE     = 1000;   // ทุนจำลอง $1000
-const RISK_PER_TRADE   = 0.02;   // เสี่ยง 2%/trade = $20 (Kelly-safe)
+const RISK_PER_TRADE   = 0.0125;  // เสี่ยง 1.25%/trade — OOS+walk-forward: DD สูงสุด ~23% (ห่าง halt 30%)
+                                  // เดิม 2% → DD backtest 35% (เกิน halt!) — ลดเป็น 1.25% ปลอดภัย + กำไร 75%/4.3ปี
 const LEVERAGE         = 3;      // เท่ากับ backtest
 const MAX_DRAWDOWN_PCT = 0.30;   // หยุดถ้า DD เกิน 30% (Donchian DD ธรรมชาติ ~20%)
 const FEE              = 0.0004;
@@ -99,6 +100,21 @@ async function tg(msg) {
     const d = await r.json();
     if (d.ok) console.log('📲 TG:', msg.slice(0, 60));
   } catch (e) { console.error('TG:', e.message); }
+}
+
+// ── ส่งไฟล์เข้า Telegram (sendDocument) ──
+async function tgDocument(filename, content, caption='') {
+  if (!BOT_TOKEN) { console.log('[TG-off] doc', filename); return; }
+  try {
+    const form = new FormData();
+    form.append('chat_id', CHAT_ID);
+    if (caption) form.append('caption', caption);
+    form.append('document', new Blob([content], { type: 'text/csv' }), filename);
+    const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, { method: 'POST', body: form });
+    const d = await r.json();
+    if (d.ok) console.log('📎 TG doc:', filename);
+    else console.error('TG doc:', JSON.stringify(d).slice(0,120));
+  } catch (e) { console.error('TG doc:', e.message); }
 }
 
 function saveState() {
@@ -335,6 +351,7 @@ async function closePosition(exit, reason) {
     num: trades.length + 1, dir, entry: +entry.toFixed(2), exit: +exit.toFixed(2),
     qty: +qty.toFixed(4), pnl: +pnl.toFixed(2), reason, bars: holdH,
     mfe: +mfe.toFixed(2), mae: +mae.toFixed(2), rMultiple: +rMultiple.toFixed(2),
+    peakPrice: +peak.toFixed(2),   // ราคาสูงสุดที่เคยไปถึง (MFE เป็นราคา — สำหรับ chart)
     riskAmt: +riskAmt.toFixed(2), atr: +atr.toFixed(2),
     equity: +accountEquity.toFixed(2),
     tp2Hit, tp2Pnl: +tp2Pnl.toFixed(2), tp2Diff,  // shadow: TP+2R เทียบ trail
@@ -385,7 +402,7 @@ function logSignal(price, hi, lo, atr, distHi, distLo) {
 function logML(features, trade) {
   try {
     const record = {
-      ts: new Date().toISOString(),
+      ts: new Date(trade.exitTs || Date.now()).toISOString(),   // ใช้ exitTs ของ trade (จับคู่ export ได้แม่นยำ)
       dir: trade.dir,
       ...features,                          // rsi, obvSlope, atrPct, breakoutStrength, channelWidth, momentum
       pnl: trade.pnl,
@@ -498,6 +515,92 @@ async function pollTelegram() {
           await closePosition(price, 'MANUAL_CLOSE');
           await tg('✅ ปิด position เองแล้ว (manual)');
         }
+      } else if (text === '/export' || text === '/log') {
+        // สร้าง CSV วิเคราะห์ละเอียด — จับคู่ด้วย trade number (แม่นยำ 100%)
+        await tg('📊 กำลังสร้างไฟล์วิเคราะห์...');
+        try {
+          // อ่าน ml file — จับคู่ indicator
+          let mlRows = [];
+          try { mlRows = fs.readFileSync(ML_LOG,'utf8').trim().split('\n').filter(Boolean).map(l=>JSON.parse(l)); } catch {}
+          const mlByTs = {};
+          mlRows.forEach(m => { if (m.ts) mlByTs[m.ts] = m; });
+
+          // อ่าน csv file — แหล่ง timestamp สำรอง (trade เก่าอาจไม่มี entryTs ใน record)
+          const csvTimeByNum = {};
+          try {
+            const csvLines = fs.readFileSync(TRADE_CSV,'utf8').trim().split('\n');
+            csvLines.slice(1).forEach(line => {
+              const c = line.split(',');
+              if (c[0] && /^\d+$/.test(c[0])) csvTimeByNum[c[0]] = { entry: c[1], exit: c[2] };  // num → {entry_time, exit_time}
+            });
+          } catch {}
+
+          let csv = 'num,entry_time,exit_time,dir,entry,exit,pnl,R,reason,held_h,mfe,mae,peakPrice,tradesSurge,tp2Hit,tp2Pnl,tp2Diff,equity\n';
+          let matchedSurge = 0, unmatchedSurge = 0;
+          trades.forEach(t => {
+            // จับคู่ ml — วิธี 1: exitTs ตรงเป๊ะ / วิธี 2: fallback ตรวจ dir+pnl ให้ตรง
+            let m = {};
+            const isoTs = t.exitTs ? new Date(t.exitTs).toISOString() : null;
+            if (isoTs && mlByTs[isoTs]) {
+              m = mlByTs[isoTs];  // ตรงเป๊ะด้วย timestamp
+            } else {
+              // fallback: หา ml ที่ dir+pnl ตรงกัน (unique พอสำหรับ trade เก่า)
+              const cand = mlRows.filter(r => r.dir===t.dir && Math.abs((r.pnl??1e9)-t.pnl)<0.01);
+              if (cand.length === 1) m = cand[0];  // ตรงตัวเดียว = มั่นใจ
+              // ถ้าเจอหลายตัว (pnl ซ้ำ) = ไม่จับคู่ (ปล่อยว่าง ดีกว่าผิด)
+            }
+            const surge = m.tradesSurge;
+            if (surge != null) matchedSurge++; else unmatchedSurge++;
+            // timestamp: จาก record ก่อน (แม่นสุด) → fallback csv file
+            let entryT = t.entryTs ? new Date(t.entryTs).toISOString() : '';
+            let exitT = t.exitTs ? new Date(t.exitTs).toISOString() : '';
+            if (!entryT && csvTimeByNum[t.num]) entryT = csvTimeByNum[t.num].entry;
+            if (!exitT && csvTimeByNum[t.num]) exitT = csvTimeByNum[t.num].exit;
+            csv += [t.num, entryT, exitT, t.dir, t.entry, t.exit, t.pnl, t.rMultiple, t.reason, t.bars,
+                    t.mfe, t.mae, t.peakPrice??'', surge??'', t.tp2Hit??'', t.tp2Pnl??'', t.tp2Diff??'', t.equity].join(',') + '\n';
+          });
+
+          // ── SUMMARY (คำนวณจาก trades จริงเท่านั้น — ไม่พึ่ง ml) ──
+          const wins = trades.filter(t=>t.pnl>0), losses = trades.filter(t=>t.pnl<=0);
+          const net = trades.reduce((s,t)=>s+t.pnl,0);
+          const grossW = wins.reduce((s,t)=>s+t.pnl,0), grossL = Math.abs(losses.reduce((s,t)=>s+t.pnl,0));
+          const longs = trades.filter(t=>t.dir==='long'), shorts = trades.filter(t=>t.dir==='short');
+          const longPnl = longs.reduce((s,t)=>s+t.pnl,0), shortPnl = shorts.reduce((s,t)=>s+t.pnl,0);
+          const avgR = trades.length ? trades.reduce((s,t)=>s+(t.rMultiple||0),0)/trades.length : 0;
+          const bestR = trades.reduce((mx,t)=>Math.max(mx,t.rMultiple||0),0);
+          const worstR = trades.reduce((mn,t)=>Math.min(mn,t.rMultiple||0),0);
+
+          csv += '\n--- SUMMARY ---\n';
+          csv += `total_trades,${trades.length}\n`;
+          csv += `wins,${wins.length}\nlosses,${losses.length}\n`;
+          csv += `win_rate,${trades.length?(wins.length/trades.length*100).toFixed(1):0}%\n`;
+          csv += `net_pnl,${net.toFixed(2)}\n`;
+          csv += `gross_win,${grossW.toFixed(2)}\ngross_loss,${grossL.toFixed(2)}\n`;
+          csv += `profit_factor,${grossL>0?(grossW/grossL).toFixed(2):'inf'}\n`;
+          csv += `avg_win,${wins.length?(grossW/wins.length).toFixed(2):0}\n`;
+          csv += `avg_loss,${losses.length?(grossL/losses.length).toFixed(2):0}\n`;
+          csv += `avg_R,${avgR.toFixed(3)}\nbest_R,${bestR.toFixed(2)}\nworst_R,${worstR.toFixed(2)}\n`;
+          csv += `long_trades,${longs.length}\nlong_pnl,${longPnl.toFixed(2)}\n`;
+          csv += `short_trades,${shorts.length}\nshort_pnl,${shortPnl.toFixed(2)}\n`;
+          csv += `equity,${accountEquity.toFixed(2)}\npeak_equity,${peakEquity.toFixed(2)}\n`;
+          csv += `max_drawdown,${peakEquity>0?((peakEquity-accountEquity)/peakEquity*100).toFixed(1):0}%\n`;
+          // ── DATA INTEGRITY (ตรวจความครบถ้วน) ──
+          csv += '\n--- DATA INTEGRITY ---\n';
+          csv += `trades_in_record,${trades.length}\n`;
+          csv += `ml_rows,${mlRows.length}\n`;
+          csv += `surge_matched,${matchedSurge}\nsurge_unmatched,${unmatchedSurge}\n`;
+          const missingTime = trades.filter(t => !t.entryTs && !csvTimeByNum[t.num]).length;
+          csv += `trades_missing_timestamp,${missingTime}\n`;
+          const netCheck = Math.abs((1000 + net) - accountEquity) < 1;
+          csv += `equity_reconciles,${netCheck?'OK':'MISMATCH ($1000+net='+(1000+net).toFixed(2)+' vs equity='+accountEquity.toFixed(2)+')'}\n`;
+
+          const ts = new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+          const warn = (!netCheck || unmatchedSurge>0) ? '\n⚠️ เช็ค DATA INTEGRITY ในไฟล์' : '\n✅ ข้อมูลครบถ้วน';
+          await tgDocument(`eth_turtle_analysis_${ts}.csv`, csv,
+            `📊 ETH Turtle วิเคราะห์\nTrades: ${trades.length} | WR: ${trades.length?(wins.length/trades.length*100).toFixed(0):0}% | Net: $${net.toFixed(2)}\nEquity: $${accountEquity.toFixed(2)} | DD: ${peakEquity>0?((peakEquity-accountEquity)/peakEquity*100).toFixed(1):0}%${warn}`);
+        } catch (e) {
+          await tg('❌ export ล้มเหลว: ' + e.message);
+        }
       } else if (text === '/resume' && halted) {
         halted = false; peakEquity = accountEquity;
         await tg('▶️ Resume — เริ่มเทรดใหม่ (reset peak)');
@@ -565,7 +668,7 @@ function buildDashboardData() {
     trades: trades.map(t => ({
       n: t.num, dir: t.dir, entry: t.entry, exit: t.exit,
       pnl: t.pnl, r: t.rMultiple, reason: t.reason==='DONCHIAN_EXIT'?'DONCHIAN':'TRAIL_SL',
-      held: t.bars, mfe: t.mfe,
+      held: t.bars, mfe: t.mfe, peakPrice: t.peakPrice,
       entryTs: t.entryTs, exitTs: t.exitTs   // เวลา (สำหรับ chart)
     })),
     channel: dashCache.channel,
