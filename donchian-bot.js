@@ -1,14 +1,13 @@
 // ═══════════════════════════════════════════════════════════
-//  ETH TURTLE PRO v1.0 — Turtle Trend-Following
-//  Strategy: D40 breakout + trail ATR×3 + exit Donchian20
-//  พิสูจน์แล้ว: 4.3 ปี +$241, 4/4 ปีกำไร, ผ่าน OOS, ชนะ B&H +$338
-//  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง (พิสูจน์ก่อน)
+//  TURTLE PRO v2.0 — Multi-Market Trend-Following
+//  Markets: ETH + SOL (parameter แยกต่อเหรียญ, equity แชร์กัน)
+//  พิสูจน์ 5.14 ปี: ETH+SOL $2,076 (207%), DD 25.1%, walk-forward 5/5
+//  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v1.5';
+const BOT_VERSION = 'v2.0';
 const fs   = require('fs');
 const http = require('http');
-// Binance live module (ปิดไว้ default — paper)
 let live;
 try { live = require('./binance-live.js'); }
 catch (e) { live = { isEnabled: () => false, modeLabel: () => 'PAPER', openLive: async()=>({}), closeLive: async()=>({}), trailStopLive: async()=>({}), setLeverage: async()=>{}, getPositionLive: async()=>null }; }
@@ -16,49 +15,71 @@ catch (e) { live = { isEnabled: () => false, modeLabel: () => 'PAPER', openLive:
 const BOT_TOKEN = process.env.TG_TOKEN || '';
 const CHAT_ID   = process.env.TG_CHAT  || '';
 const BINANCE   = 'https://fapi.binance.com';
-const STATE_FILE  = '/root/eth-bot/donchian_state.json';
-const TRADES_FILE = '/root/eth-bot/donchian_trades.json';
-const SIGNAL_LOG  = '/root/eth-bot/donchian_signals.csv';   // ทุกการเช็ค (วิเคราะห์ภายหลัง)
-const EQUITY_LOG  = '/root/eth-bot/donchian_equity.csv';    // equity snapshot รายวัน
-const TRADE_CSV   = '/root/eth-bot/donchian_trades.csv';    // trade log อ่านง่าย
-const ML_LOG      = '/root/eth-bot/turtle_ml.jsonl';        // ML dataset (feature+ผล สำหรับ train model)
+const DIR         = '/root/eth-bot';
+const STATE_FILE  = DIR + '/donchian_state.json';
+const TRADES_FILE = DIR + '/donchian_trades.json';
+const SIGNAL_LOG  = DIR + '/donchian_signals.csv';
+const EQUITY_LOG  = DIR + '/donchian_equity.csv';
+const TRADE_CSV   = DIR + '/donchian_trades.csv';
+const ML_LOG      = DIR + '/turtle_ml.jsonl';
 
-// ── STRATEGY PARAMETERS (พิสูจน์จาก backtest 4.3 ปี) ──
-const SYMBOL        = 'ETHUSDT';
-const ENTRY_PERIOD  = 40;      // Donchian breakout (high/low 40 แท่ง)
-const EXIT_PERIOD   = 20;      // Donchian exit ตรงข้าม (Turtle classic)
-const TRAIL_ATR     = 3.0;     // trailing stop = ATR×3 (let winner run)
-const ATR_PERIOD    = 14;
-const TIMEFRAME     = '1h';
+// ══════════════════════════════════════════════════════════
+//  MARKETS — parameter แยกต่อเหรียญ (เพิ่ม/ลบเหรียญได้ที่นี่)
+//  ค่าทั้งหมดผ่าน backtest 5.14 ปี + OOS + walk-forward
+// ══════════════════════════════════════════════════════════
+const MARKETS = {
+  ETHUSDT: {
+    label: 'ETH',
+    enabled: true,
+    entryPeriod: 40,      // Donchian breakout
+    exitPeriod: 30,       // Donchian exit (D30 > D20: $317→$382)
+    trailATR: 3.5,        // trailing stop ×ATR
+    breakevenAtR: 1.0,    // ลอยถึง +1R → SL ไป entry
+    atrPeriod: 14,
+    timeframe: '1h'
+  },
+  SOLUSDT: {
+    label: 'SOL',
+    enabled: true,
+    entryPeriod: 40,
+    exitPeriod: 30,       // SOL: D30 $1,395 | OOS $402 | wf 5/5
+    trailATR: 3.5,
+    breakevenAtR: 1.0,
+    atrPeriod: 14,
+    timeframe: '1h'
+  }
+};
+const SYMBOLS = Object.keys(MARKETS).filter(s => MARKETS[s].enabled);
 
-// ── RISK MANAGEMENT (สำคัญสำหรับ edge บาง Kelly 3%) ──
-const ACCOUNT_SIZE     = 1000;   // ทุนจำลอง $1000
-const RISK_PER_TRADE   = 0.0125;  // เสี่ยง 1.25%/trade — OOS+walk-forward: DD สูงสุด ~23% (ห่าง halt 30%)
-                                  // เดิม 2% → DD backtest 35% (เกิน halt!) — ลดเป็น 1.25% ปลอดภัย + กำไร 75%/4.3ปี
-const LEVERAGE         = 3;      // เท่ากับ backtest
-const MAX_DRAWDOWN_PCT = 0.30;   // หยุดถ้า DD เกิน 30% (Donchian DD ธรรมชาติ ~20%)
+// ── RISK (แชร์ทั้งพอร์ต) ──
+const ACCOUNT_SIZE     = 1000;
+const RISK_PER_TRADE   = 0.009;  // 0.90% ของ equity รวม ต่อ trade
+const LEVERAGE         = 3;
+const MAX_DRAWDOWN_PCT = 0.30;
 const FEE              = 0.0004;
 const SLIP             = 0.0002;
 
-// ── STATE ──
-let position = null;     // { dir, entry, sl, peak, qty, bars, entryTs, entryHigh40, entryLow40 }
-let trades = [];
+// ── STATE (position แยกต่อเหรียญ, equity/trades รวม) ──
+let positions = {};           // { ETHUSDT: {...} | null, SOLUSDT: {...} | null }
+SYMBOLS.forEach(s => positions[s] = null);
+let trades = [];              // ทุกเหรียญรวมกัน (มี field .symbol)
 let accountEquity = ACCOUNT_SIZE;
 let peakEquity = ACCOUNT_SIZE;
-let halted = false;      // max drawdown stop
+let halted = false;
 let lastUpdateId = 0;
 
 // ═══════════════ HELPERS ═══════════════
-async function fetchKlines(limit) {
-  const r = await fetch(`${BINANCE}/fapi/v1/klines?symbol=${SYMBOL}&interval=${TIMEFRAME}&limit=${limit}`);
+async function fetchKlines(symbol, limit) {
+  const cfg = MARKETS[symbol];
+  const r = await fetch(`${BINANCE}/fapi/v1/klines?symbol=${symbol}&interval=${cfg.timeframe}&limit=${limit}`);
   return r.json();
 }
-async function fetchPrice() {
-  const r = await fetch(`${BINANCE}/fapi/v1/ticker/price?symbol=${SYMBOL}`);
+async function fetchPrice(symbol) {
+  const r = await fetch(`${BINANCE}/fapi/v1/ticker/price?symbol=${symbol}`);
   const d = await r.json();
   return parseFloat(d.price);
 }
-function calcATR(kl, p = ATR_PERIOD) {
+function calcATR(kl, p = 14) {
   if (kl.length < p + 1) return 0;
   let s = 0;
   for (let i = kl.length - p; i < kl.length; i++) {
@@ -119,18 +140,31 @@ async function tgDocument(filename, content, caption='') {
 
 function saveState() {
   try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ position, accountEquity, peakEquity, halted }));
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ v: 2, positions, accountEquity, peakEquity, halted }));
     fs.writeFileSync(TRADES_FILE, JSON.stringify(trades));
   } catch (e) { console.error('save:', e.message); }
 }
 function loadState() {
   try {
     if (fs.existsSync(STATE_FILE)) {
-      const s = JSON.parse(fs.readFileSync(STATE_FILE));
-      position = s.position; accountEquity = s.accountEquity ?? ACCOUNT_SIZE;
-      peakEquity = s.peakEquity ?? ACCOUNT_SIZE; halted = s.halted ?? false;
+      const st = JSON.parse(fs.readFileSync(STATE_FILE));
+      accountEquity = st.accountEquity ?? ACCOUNT_SIZE;
+      peakEquity = st.peakEquity ?? ACCOUNT_SIZE;
+      halted = st.halted ?? false;
+      if (st.positions) {                       // v2 format
+        SYMBOLS.forEach(sym => positions[sym] = st.positions[sym] ?? null);
+      } else if (st.position) {                 // v1 format → migrate (position เดิม = ETHUSDT)
+        positions['ETHUSDT'] = st.position;
+        console.log('[migrate] แปลง state v1 → v2 (position เดิม = ETHUSDT)');
+      }
     }
-    if (fs.existsSync(TRADES_FILE)) trades = JSON.parse(fs.readFileSync(TRADES_FILE));
+    if (fs.existsSync(TRADES_FILE)) {
+      trades = JSON.parse(fs.readFileSync(TRADES_FILE));
+      // trade เก่าไม่มี symbol → เติมเป็น ETHUSDT (ข้อมูล 19 trades ไม่หาย)
+      let migrated = 0;
+      trades.forEach(t => { if (!t.symbol) { t.symbol = 'ETHUSDT'; migrated++; } });
+      if (migrated) console.log(`[migrate] เติม symbol=ETHUSDT ให้ ${migrated} trades เก่า`);
+    }
   } catch (e) { console.error('load:', e.message); }
 }
 
@@ -148,66 +182,102 @@ function calcPositionSize(entry, sl) {
 
 // ═══════════════ CORE STRATEGY LOOP ═══════════════
 // ═══════════════ POSITION REPORT (ระหว่างถือ) ═══════════════
-function buildPositionReport(price) {
-  if (!position) return '📍 FLAT — รอ signal (ETH break D40)';
+function buildPositionReport(symbol, price) {
+  const position = positions[symbol];
+  const cfg = MARKETS[symbol];
+  if (!position) return `📍 ${cfg.label} FLAT — รอ signal (break D${cfg.entryPeriod})`;
   const { dir, entry, sl, peak, qty, entryTs } = position;
   const floatPnl = dir === 'long' ? (price - entry) * qty : (entry - price) * qty;
   const heldH = Math.round((Date.now() - entryTs) / 3600000);
   const slDist = Math.abs(price - sl);
-  const locked = dir === 'long' ? (sl > entry) : (sl < entry);   // SL ล็อกกำไรแล้วมั้ย
-  // กำไรขั้นต่ำที่ล็อกไว้ = ถ้าโดน SL ตอนนี้จะได้เท่าไหร่ (หัก fee คร่าวๆ)
+  const locked = dir === 'long' ? (sl > entry) : (sl < entry);
   const lockedGross = dir === 'long' ? (sl - entry) * qty : (entry - sl) * qty;
   const lockedNet = lockedGross - (entry + sl) * qty * (FEE + SLIP);
   const emoji = floatPnl >= 0 ? '🟢' : '🔴';
-  return `${emoji} <b>${dir.toUpperCase()} กำลังถือ</b>\n\n` +
+  const curR = position.riskAmt > 0 ? floatPnl / position.riskAmt : 0;
+  let beLine = '';
+  if (cfg.breakevenAtR > 0) {
+    if (position.beDone) beLine = `🛡 ล็อกทุนแล้ว (ไม่ขาดทุนแน่นอน)\n`;
+    else if (curR > 0) beLine = `🛡 ล็อกทุนที่ +${cfg.breakevenAtR}R (ตอนนี้ ${curR.toFixed(2)}R)\n`;
+  }
+  return `${emoji} <b>${cfg.label} ${dir.toUpperCase()} กำลังถือ</b>\n\n` +
     `Entry $${f(entry)} → ตอนนี้ $${f(price)}\n` +
     `กำไรลอย: $${f(floatPnl)} ${floatPnl>=0?'✅':''}\n` +
     `ถือ: ${heldH}h | peak $${f(peak)}\n` +
     `SL $${f(sl)} (ห่าง $${f(slDist)}) ${locked ? `🔒 ล็อกกำไรขั้นต่ำ $${f(lockedNet)}` : ''}\n` +
-    `Equity $${f(accountEquity)}`;
+    beLine +
+    `Equity รวม $${f(accountEquity)}`;
 }
 
-let lastReportTs = 0;
-let lastSLForReport = 0;
-async function maybePositionReport(price) {
+// สรุปทุกตลาดในข้อความเดียว
+function buildAllPositionsReport(prices) {
+  const open = SYMBOLS.filter(s => positions[s]);
+  if (!open.length) return `📍 FLAT ทุกตลาด (${SYMBOLS.map(s=>MARKETS[s].label).join(', ')})\nEquity $${f(accountEquity)}`;
+  let totalFloat = 0;
+  const lines = open.map(sym => {
+    const p = positions[sym], px = prices[sym] ?? p.entry;
+    const fl = p.dir === 'long' ? (px - p.entry) * p.qty : (p.entry - px) * p.qty;
+    totalFloat += fl;
+    const heldH = Math.round((Date.now() - p.entryTs) / 3600000);
+    return `${fl>=0?'🟢':'🔴'} <b>${MARKETS[sym].label}</b> ${p.dir.toUpperCase()} $${f(p.entry)} → $${f(px)}\n` +
+           `   ลอย $${f(fl)} | ${heldH}h | SL $${f(p.sl)}${p.beDone?' 🛡':''}`;
+  });
+  return `📊 <b>POSITIONS (${open.length}/${SYMBOLS.length})</b>\n\n` + lines.join('\n') +
+         `\n\nกำไรลอยรวม: $${f(totalFloat)}\nEquity $${f(accountEquity)}`;
+}
+
+let lastReportTs = {};
+let lastSLForReport = {};
+async function maybePositionReport(symbol, price) {
+  const position = positions[symbol];
   if (!position) return;
   const now = Date.now();
-  const hoursSince = (now - lastReportTs) / 3600000;
-  // แจ้งเมื่อ: ทุก 6 ชม. หรือ SL ขยับ (trail ล็อกกำไรเพิ่ม)
-  const slMoved = lastSLForReport && Math.abs(position.sl - lastSLForReport) > 0.01;
+  const hoursSince = (now - (lastReportTs[symbol] || 0)) / 3600000;
+  const slMoved = lastSLForReport[symbol] && Math.abs(position.sl - lastSLForReport[symbol]) > 0.01;
   if (hoursSince >= 6 || slMoved) {
-    await tg(buildPositionReport(price) + (slMoved ? '\n\n🔄 SL ขยับ (trail ตามกำไร)' : ''));
-    lastReportTs = now;
-    lastSLForReport = position.sl;
+    await tg(buildPositionReport(symbol, price) + (slMoved ? '\n\n🔄 SL ขยับ (trail ตามกำไร)' : ''));
+    lastReportTs[symbol] = now;
+    lastSLForReport[symbol] = position.sl;
   }
 }
 
 // ═══════════════ POSITION REPORT END ═══════════════
-async function checkSignal() {
+// เช็คทุกตลาด (เรียกจาก loop หลัก)
+async function checkAllMarkets() {
   if (halted) return;
-  logEquitySnapshot();   // snapshot รายวัน (วิเคราะห์ drawdown ภายหลัง)
+  logEquitySnapshot();
+  for (const symbol of SYMBOLS) {
+    try { await checkSignal(symbol); }
+    catch (e) { console.error(`[${symbol}]`, e.message); }
+  }
+  saveState();
+}
+
+async function checkSignal(symbol) {
+  const cfg = MARKETS[symbol];
+  const position = positions[symbol];
 
   let kl;
-  // ดึง 110 แท่ง — พอสำหรับ Donchian40 + ATR14 + tradesSurge SMA100 (indicator ใหม่)
-  try { kl = await fetchKlines(Math.max(ENTRY_PERIOD + ATR_PERIOD + 5, 110)); }
-  catch (e) { console.error('fetch:', e.message); return; }
-  if (!Array.isArray(kl) || kl.length < ENTRY_PERIOD + 2) return;
+  const need = Math.max(cfg.entryPeriod, cfg.exitPeriod) + cfg.atrPeriod + 5;
+  try { kl = await fetchKlines(symbol, Math.max(need, 110)); }
+  catch (e) { console.error(`fetch ${symbol}:`, e.message); return; }
+  if (!Array.isArray(kl) || kl.length < cfg.entryPeriod + 2) return;
 
   const cls = kl.map(k => +k[4]);
   const price = cls[cls.length - 1];
-  const atr = calcATR(kl);
+  const atr = calcATR(kl, cfg.atrPeriod);
   if (atr <= 0) return;
 
   // Donchian channels (ไม่รวมแท่งปัจจุบัน)
-  const recent = cls.slice(-ENTRY_PERIOD - 1, -1);
+  const recent = cls.slice(-cfg.entryPeriod - 1, -1);
   const entryHigh = Math.max(...recent);
   const entryLow  = Math.min(...recent);
-  const exitRecent = cls.slice(-EXIT_PERIOD - 1, -1);
+  const exitRecent = cls.slice(-cfg.exitPeriod - 1, -1);
   const exitHigh = Math.max(...exitRecent);
   const exitLow  = Math.min(...exitRecent);
 
-  // อัพเดต cache สำหรับ /dashboard (ราคา + channel + history)
-  dashCache = {
+  // cache สำหรับ /dashboard (แยกต่อเหรียญ)
+  dashCache[symbol] = {
     price,
     channel: {
       upper: +entryHigh.toFixed(2), lower: +entryLow.toFixed(2),
@@ -215,116 +285,125 @@ async function checkSignal() {
       price: +price.toFixed(2),
       history: cls.slice(-12).map(c => +c.toFixed(2))
     },
+    atr: +atr.toFixed(2),
     updatedAt: Date.now()
   };
 
   const ts = new Date().toISOString().slice(11, 19);
+  const L = cfg.label;
 
   // ───────── มี position: จัดการ exit/trail ─────────
   if (position) {
-    // bars คำนวณจากเวลาจริงตอนปิด (ไม่นับทุก loop)
     let exitReason = null;
     let slMovedForLive = false;
 
-    // track MAE (max adverse) — ราคาสวนทางสุด
+    const curR = position.riskAmt > 0
+      ? ((position.dir === 'long' ? price - position.entry : position.entry - price) * position.qty) / position.riskAmt
+      : 0;
+    const beHit = cfg.breakevenAtR > 0 && curR >= cfg.breakevenAtR;
+
     if (position.dir === 'long') {
       if (price < position.trough) position.trough = price;
       if (price > position.peak) position.peak = price;
-      const newSL = position.peak - atr * TRAIL_ATR;
-      if (newSL > position.sl) { position.sl = newSL; slMovedForLive = true; }
+      let newSL = position.peak - atr * cfg.trailATR;
+      // BREAKEVEN: ลอยถึง +1R → ดัน SL มาที่ entry (ไม่ยอมให้พลิกขาดทุน)
+      if (beHit && newSL < position.entry) newSL = position.entry;
+      if (newSL > position.sl) {
+        if (!position.beDone && beHit && newSL === position.entry) position.beDone = true;
+        position.sl = newSL; slMovedForLive = true;
+      }
       if (price <= position.sl) exitReason = 'TRAIL_SL';
       else if (price < exitLow) exitReason = 'DONCHIAN_EXIT';
     } else {
       if (price > position.trough) position.trough = price;
       if (price < position.peak) position.peak = price;
-      const newSL = position.peak + atr * TRAIL_ATR;
-      if (newSL < position.sl) { position.sl = newSL; slMovedForLive = true; }
+      let newSL = position.peak + atr * cfg.trailATR;
+      if (beHit && newSL > position.entry) newSL = position.entry;
+      if (newSL < position.sl) {
+        if (!position.beDone && beHit && newSL === position.entry) position.beDone = true;
+        position.sl = newSL; slMovedForLive = true;
+      }
       if (price >= position.sl) exitReason = 'TRAIL_SL';
       else if (price > exitHigh) exitReason = 'DONCHIAN_EXIT';
     }
 
-    // ── LIVE: ขยับ SL จริง (cancel เก่า + ตั้งใหม่) เมื่อ trail ขยับ ──
     if (live.isEnabled() && slMovedForLive && !exitReason) {
       const stopSide = position.dir === 'long' ? 'SELL' : 'BUY';
-      try { await live.trailStopLive(stopSide, position.qty, position.sl); }
+      try { await live.trailStopLive(stopSide, position.qty, position.sl, symbol); }
       catch (e) { console.error('[LIVE] trail:', e.message); }
     }
 
     const heldH = Math.round((Date.now() - position.entryTs) / 3600000);
-    console.log(`[${ts}] $${f(price)} ${position.dir.toUpperCase()} | SL $${f(position.sl)} peak $${f(position.peak)} ${heldH}h`);
+    console.log(`[${ts}] ${L} $${f(price)} ${position.dir.toUpperCase()} | SL $${f(position.sl)} peak $${f(position.peak)} ${heldH}h`);
 
-    if (exitReason) await closePosition(price, exitReason);
-    else await maybePositionReport(price);   // report ระหว่างถือ (ทุก 6 ชม. + SL ขยับ)
-    saveState();
+    if (exitReason) await closePosition(symbol, price, exitReason);
+    else await maybePositionReport(symbol, price);
     return;
   }
 
   // ───────── ไม่มี position: หา entry ─────────
-  // ระยะถึง breakout (ดูว่าใกล้ trade มั้ย)
   const distToHigh = ((entryHigh - price) / price * 100);
   const distToLow  = ((price - entryLow) / price * 100);
-  console.log(`[${ts}] $${f(price)} FLAT | D40 hi $${f(entryHigh)}(+${distToHigh.toFixed(1)}%) lo $${f(entryLow)}(-${distToLow.toFixed(1)}%) | ATR $${f(atr)}`);
+  console.log(`[${ts}] ${L} $${f(price)} FLAT | D${cfg.entryPeriod} hi $${f(entryHigh)}(+${distToHigh.toFixed(1)}%) lo $${f(entryLow)}(-${distToLow.toFixed(1)}%) | ATR $${f(atr)}`);
 
-  // Signal log (CSV) — เก็บทุกการเช็คเพื่อวิเคราะห์ภายหลัง
-  logSignal(price, entryHigh, entryLow, atr, distToHigh, distToLow);
+  logSignal(symbol, price, entryHigh, entryLow, atr, distToHigh, distToLow);
 
   if (price > entryHigh) {
-    await openPosition('long', price, atr, kl, entryHigh, entryLow);
+    await openPosition(symbol, 'long', price, atr, kl, entryHigh, entryLow);
   } else if (price < entryLow) {
-    await openPosition('short', price, atr, kl, entryHigh, entryLow);
+    await openPosition(symbol, 'short', price, atr, kl, entryHigh, entryLow);
   }
-  saveState();
 }
 
-async function openPosition(dir, entry, atr, kl, entryHigh, entryLow) {
-  const sl = dir === 'long' ? entry - atr * TRAIL_ATR : entry + atr * TRAIL_ATR;
+async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
+  const cfg = MARKETS[symbol];
+  const sl = dir === 'long' ? entry - atr * cfg.trailATR : entry + atr * cfg.trailATR;
   const qty = calcPositionSize(entry, sl);
   if (qty <= 0) return;
 
-  // ML features ตอน entry (เก็บไว้ train model อนาคต)
+  // ML features ตอน entry
   const cls = kl.map(k => +k[4]);
-  // ── TRADES SURGE (indicator ใหม่จาก basket test) ──
-  // SMA(trades,5)/SMA(trades,100) — วัดความคึกคักของดีล (order flow)
-  // basket test: >=2.0 กรอง fakeout, กำไร+96% DD-54% (OOS+walk-forward ผ่าน)
-  // ตอนนี้ LOG อย่างเดียว (ไม่กรอง) — เก็บ data เทียบก่อนเปิดใช้จริง
-  const tradesArr = kl.map(k => +k[8]); // field [8] = number of trades
+  const tradesArr = kl.map(k => +k[8]);
   const smaN = (arr, n) => arr.length >= n ? arr.slice(-n).reduce((s,x)=>s+x,0)/n : null;
   const ts5 = smaN(tradesArr, 5), ts100 = smaN(tradesArr, 100);
   const tradesSurge = (ts5 && ts100) ? +(ts5 / ts100).toFixed(3) : null;
   const features = {
     rsi: +calcRSI(cls).toFixed(2),
     obvSlope: +calcOBVSlope(kl).toFixed(0),
-    atrPct: +(atr / entry * 100).toFixed(3),       // ATR เป็น % ของราคา (volatility)
-    breakoutStrength: +(Math.abs(entry - (dir==='long'?entryHigh:entryLow)) / atr).toFixed(3), // ทะลุแรงแค่ไหน (×ATR)
-    channelWidth: +((entryHigh - entryLow) / entry * 100).toFixed(2), // กว้างของ channel (%)
-    momentum: +((cls[cls.length-1] - cls[cls.length-6]) / cls[cls.length-6] * 100).toFixed(2), // momentum 5 แท่ง
-    tradesSurge  // indicator ใหม่ — จะดูว่า trade ที่ surge>=2 เป็น winner บ่อยกว่ามั้ย (paper validate)
+    atrPct: +(atr / entry * 100).toFixed(3),
+    breakoutStrength: +(Math.abs(entry - (dir==='long'?entryHigh:entryLow)) / atr).toFixed(3),
+    channelWidth: +((entryHigh - entryLow) / entry * 100).toFixed(2),
+    momentum: +((cls[cls.length-1] - cls[cls.length-6]) / cls[cls.length-6] * 100).toFixed(2),
+    tradesSurge
   };
 
   const riskAmt = Math.abs(entry - sl) * qty;
-  position = { dir, entry, sl, peak: entry, trough: entry, qty, bars: 0, atr,
-    initialSL: sl, riskAmt, entryTs: Date.now(), features };
+  positions[symbol] = { symbol, dir, entry, sl, peak: entry, trough: entry, qty, bars: 0, atr,
+    initialSL: sl, riskAmt, entryTs: Date.now(), beDone: false, features };
 
-  // ── LIVE: ส่ง order จริง (ถ้าเปิด live mode) ──
   let liveInfo = '';
   if (live.isEnabled()) {
-    const r = await live.openLive(dir, qty, sl);
+    const r = await live.openLive(dir, qty, sl, symbol);
     if (r.error) { liveInfo = `\n⚠️ LIVE error: ${r.error}`; }
     else if (!r.simulated) { liveInfo = `\n✅ LIVE order ส่งแล้ว (${live.modeLabel()})`; }
   }
 
   const notional = qty * entry;
-  await tg(`🐢 <b>TURTLE PRO ENTRY — ${dir.toUpperCase()}</b>\n\n` +
-    `Entry: $${f(entry)}\nSL: $${f(sl)} (ATR×${TRAIL_ATR})\n` +
-    `Qty: ${qty.toFixed(4)} ETH ($${f(notional)})\n` +
+  const openCount = SYMBOLS.filter(sy => positions[sy]).length;
+  await tg(`🐢 <b>${cfg.label} ENTRY — ${dir.toUpperCase()}</b>\n\n` +
+    `Entry: $${f(entry)}\nSL: $${f(sl)} (ATR×${cfg.trailATR})\n` +
+    `Qty: ${qty.toFixed(4)} ${cfg.label} ($${f(notional)})\n` +
     `Risk: $${f(riskAmt)} (${(RISK_PER_TRADE*100)}%)\n` +
-    `Equity: $${f(accountEquity)}${liveInfo}`);
-  console.log(`>>> ENTRY ${dir} @ $${f(entry)} SL $${f(sl)} qty ${qty.toFixed(4)} [${live.modeLabel()}]`);
+    `Equity: $${f(accountEquity)} | เปิดอยู่ ${openCount}/${SYMBOLS.length} ตลาด${liveInfo}`);
+  console.log(`>>> ${cfg.label} ENTRY ${dir} @ $${f(entry)} SL $${f(sl)} qty ${qty.toFixed(4)} [${live.modeLabel()}]`);
 }
 
-async function closePosition(exit, reason) {
+async function closePosition(symbol, exit, reason) {
+  const position = positions[symbol];
+  if (!position) return;
+  const cfg = MARKETS[symbol];
   const { dir, entry, qty, peak, trough, entryTs, riskAmt, atr } = position;
-  const bars = Math.round((Date.now() - entryTs) / 3600000);  // ชั่วโมงจริง (แก้ bug นับทุก loop)
+  const bars = Math.round((Date.now() - entryTs) / 3600000);
   const gross = dir === 'long' ? (exit - entry) * qty : (entry - exit) * qty;
   const fee = (entry + exit) * qty * (FEE + SLIP);
   const fundingCost = (qty * entry) * 0.0001 * (bars / 8);
@@ -333,67 +412,66 @@ async function closePosition(exit, reason) {
   accountEquity += pnl;
   if (accountEquity > peakEquity) peakEquity = accountEquity;
 
-  // MFE = กำไรสูงสุดที่เคยถึง, MAE = ขาดทุนสูงสุดที่เคยเจอ
   const mfe = dir === 'long' ? (peak - entry) * qty : (entry - peak) * qty;
   const mae = dir === 'long' ? (trough - entry) * qty : (entry - trough) * qty;
-  const rMultiple = riskAmt > 0 ? pnl / riskAmt : 0;   // กำไรเป็นกี่เท่าของความเสี่ยง
+  const rMultiple = riskAmt > 0 ? pnl / riskAmt : 0;
   const holdH = bars;
 
-  // ── TP+2R SHADOW (paper validate — ไม่เปลี่ยน exit จริง) ──
-  // เทียบ: ถ้ามี Take-Profit ที่ +2R จะเก็บได้เท่าไหร่ vs trail จริง
-  // MFE (peak) บอกว่าเคยกำไรสูงสุดกี่ R — ถ้า MFE >= 2R แปลว่า TP+2R จะโดน (เก็บ +2R พอดี)
-  const mfeR = riskAmt > 0 ? mfe / riskAmt : 0;         // MFE เป็นกี่ R
-  const tp2Hit = mfeR >= 2;                             // ราคาเคยถึง +2R มั้ย (TP จะโดน)
-  const tp2Pnl = tp2Hit ? riskAmt * 2 : pnl;            // ถ้าโดน TP → เก็บ +2R, ไม่โดน → เท่า trail จริง
-  const tp2Diff = +(tp2Pnl - pnl).toFixed(2);          // TP+2R ดีกว่า trail เท่าไหร่ (+ = TP ดีกว่า)
+  // TP+2R shadow (paper validate — ไม่เปลี่ยน exit จริง)
+  const mfeR = riskAmt > 0 ? mfe / riskAmt : 0;
+  const tp2Hit = mfeR >= 2;
+  const tp2Pnl = tp2Hit ? riskAmt * 2 : pnl;
+  const tp2Diff = +(tp2Pnl - pnl).toFixed(2);
 
   const trade = {
-    num: trades.length + 1, dir, entry: +entry.toFixed(2), exit: +exit.toFixed(2),
+    num: trades.length + 1, symbol, label: cfg.label,
+    dir, entry: +entry.toFixed(2), exit: +exit.toFixed(2),
     qty: +qty.toFixed(4), pnl: +pnl.toFixed(2), reason, bars: holdH,
     mfe: +mfe.toFixed(2), mae: +mae.toFixed(2), rMultiple: +rMultiple.toFixed(2),
-    peakPrice: +peak.toFixed(2),   // ราคาสูงสุดที่เคยไปถึง (MFE เป็นราคา — สำหรับ chart)
+    peakPrice: +peak.toFixed(2),
     riskAmt: +riskAmt.toFixed(2), atr: +atr.toFixed(2),
     equity: +accountEquity.toFixed(2),
-    tp2Hit, tp2Pnl: +tp2Pnl.toFixed(2), tp2Diff,  // shadow: TP+2R เทียบ trail
+    tp2Hit, tp2Pnl: +tp2Pnl.toFixed(2), tp2Diff,
     entryTs, exitTs: Date.now()
   };
   trades.push(trade);
   logTradeCSV(trade);
-  logML(position.features, trade);   // บันทึก ML (feature ตอนเข้า + ผลลัพธ์)
+  logML(position.features, trade);
 
-  // ── LIVE: ปิด order จริง (cancel SL + market close) ──
   if (live.isEnabled()) {
-    try { await live.closeLive(dir, qty); } catch (e) { console.error('[LIVE] close:', e.message); }
+    try { await live.closeLive(dir, qty, symbol); } catch (e) { console.error('[LIVE] close:', e.message); }
   }
 
   const win = pnl > 0;
   const emoji = win ? '🟢' : '🔴';
-  await tg(`${emoji} <b>TURTLE PRO EXIT — ${reason}</b>\n\n` +
+  const openCount = SYMBOLS.filter(sy => positions[sy] && sy !== symbol).length;
+  await tg(`${emoji} <b>${cfg.label} EXIT — ${reason}</b>\n\n` +
     `${dir.toUpperCase()} $${f(entry)} → $${f(exit)}\n` +
     `PnL: $${f(pnl)} (${rMultiple > 0 ? '+' : ''}${rMultiple.toFixed(2)}R) ${win ? '✅' : ''}\n` +
     `ถือ: ${holdH} ชม. | MFE $${f(mfe)} MAE $${f(mae)}\n` +
     `📊 TP+2R shadow: ${tp2Hit ? `เก็บ $${f(tp2Pnl)} (${tp2Diff>=0?'+':''}$${f(tp2Diff)} vs trail)` : 'ไม่ถึง +2R (เท่า trail)'}\n` +
-    `Equity: $${f(accountEquity)} (peak $${f(peakEquity)})`);
-  console.log(`<<< EXIT ${reason} pnl $${f(pnl)} (${rMultiple.toFixed(2)}R) equity $${f(accountEquity)}`);
+    `Equity: $${f(accountEquity)} (peak $${f(peakEquity)})` +
+    (openCount ? `\nยังเปิดอยู่ ${openCount} ตลาด` : ''));
+  console.log(`<<< ${cfg.label} EXIT ${reason} pnl $${f(pnl)} (${rMultiple.toFixed(2)}R) equity $${f(accountEquity)}`);
 
-  position = null;
+  positions[symbol] = null;
 
-  // ── Max Drawdown Stop ──
+  // Max Drawdown Stop (คิดจาก equity รวมทั้งพอร์ต)
   const dd = (peakEquity - accountEquity) / peakEquity;
   if (dd >= MAX_DRAWDOWN_PCT) {
     halted = true;
-    await tg(`🛑 <b>MAX DRAWDOWN STOP</b>\n\nDD ${(dd*100).toFixed(1)}% เกินลิมิต ${(MAX_DRAWDOWN_PCT*100)}%\nหยุดเทรด — ต้อง review ก่อนเริ่มใหม่`);
+    await tg(`🛑 <b>MAX DRAWDOWN STOP</b>\n\nDD ${(dd*100).toFixed(1)}% เกินลิมิต ${(MAX_DRAWDOWN_PCT*100)}%\nหยุดเทรดทุกตลาด — ต้อง review ก่อนเริ่มใหม่`);
     console.log('!!! HALTED — max drawdown');
   }
 }
 
 // ═══════════════ DETAILED LOGGING ═══════════════
-function logSignal(price, hi, lo, atr, distHi, distLo) {
+function logSignal(symbol, price, hi, lo, atr, distHi, distLo) {
   try {
     if (!fs.existsSync(SIGNAL_LOG)) {
-      fs.writeFileSync(SIGNAL_LOG, 'timestamp,price,d40_high,d40_low,atr,dist_to_high_pct,dist_to_low_pct,has_position\n');
+      fs.writeFileSync(SIGNAL_LOG, 'timestamp,symbol,price,entry_high,entry_low,atr,dist_to_high_pct,dist_to_low_pct,has_position\n');
     }
-    const row = `${new Date().toISOString()},${price.toFixed(2)},${hi.toFixed(2)},${lo.toFixed(2)},${atr.toFixed(2)},${distHi.toFixed(2)},${distLo.toFixed(2)},${position ? 1 : 0}\n`;
+    const row = `${new Date().toISOString()},${symbol},${price.toFixed(2)},${hi.toFixed(2)},${lo.toFixed(2)},${atr.toFixed(2)},${distHi.toFixed(2)},${distLo.toFixed(2)},${positions[symbol] ? 1 : 0}\n`;
     fs.appendFileSync(SIGNAL_LOG, row);
   } catch (e) {}
 }
@@ -402,7 +480,8 @@ function logSignal(price, hi, lo, atr, distHi, distLo) {
 function logML(features, trade) {
   try {
     const record = {
-      ts: new Date(trade.exitTs || Date.now()).toISOString(),   // ใช้ exitTs ของ trade (จับคู่ export ได้แม่นยำ)
+      ts: new Date(trade.exitTs || Date.now()).toISOString(),
+      symbol: trade.symbol, label: trade.label,
       dir: trade.dir,
       ...features,                          // rsi, obvSlope, atrPct, breakoutStrength, channelWidth, momentum
       pnl: trade.pnl,
@@ -421,11 +500,11 @@ function logML(features, trade) {
 function logTradeCSV(t) {
   try {
     if (!fs.existsSync(TRADE_CSV)) {
-      fs.writeFileSync(TRADE_CSV, 'num,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity\n');
+      fs.writeFileSync(TRADE_CSV, 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity\n');
     }
     const et = new Date(t.entryTs).toISOString();
     const xt = new Date(t.exitTs).toISOString();
-    const row = `${t.num},${et},${xt},${t.dir},${t.entry},${t.exit},${t.qty},${t.pnl},${t.rMultiple},${t.reason},${t.bars},${t.mfe},${t.mae},${t.riskAmt},${t.atr},${t.equity}\n`;
+    const row = `${t.num},${t.symbol||'ETHUSDT'},${et},${xt},${t.dir},${t.entry},${t.exit},${t.qty},${t.pnl},${t.rMultiple},${t.reason},${t.bars},${t.mfe},${t.mae},${t.riskAmt},${t.atr},${t.equity}\n`;
     fs.appendFileSync(TRADE_CSV, row);
   } catch (e) {}
 }
@@ -447,15 +526,23 @@ function logEquitySnapshot() {
 async function sendDailySummary() {
   const day = new Date().toISOString().slice(0, 10);
   const todayTrades = trades.filter(t => new Date(t.exitTs).toISOString().slice(0,10) === day);
-  if (!todayTrades.length && !position) return;   // ไม่มีอะไรเกิด ไม่ต้องสรุป
+  const openNow = SYMBOLS.filter(s => positions[s]);
+  if (!todayTrades.length && !openNow.length) return;
   const todayPnl = todayTrades.reduce((s, t) => s + t.pnl, 0);
   const dd = ((peakEquity - accountEquity) / peakEquity * 100).toFixed(1);
-  const pos = position ? `${position.dir.toUpperCase()} @ $${f(position.entry)} (ถือ ${Math.round((Date.now()-position.entryTs)/3600000)}h)` : 'FLAT';
+  // แยกผลรายตลาด
+  const perMarket = SYMBOLS.map(sym => {
+    const tt = todayTrades.filter(t => t.symbol === sym);
+    const pnl = tt.reduce((s,t)=>s+t.pnl,0);
+    const p = positions[sym];
+    const st = p ? `${p.dir.toUpperCase()} ${Math.round((Date.now()-p.entryTs)/3600000)}h` : 'FLAT';
+    return `${MARKETS[sym].label}: ${tt.length} trades $${f(pnl)} | ${st}`;
+  }).join('\n');
   await tg(`📊 <b>Daily Summary ${day}</b>\n\n` +
     `Trades วันนี้: ${todayTrades.length} (PnL $${f(todayPnl)})\n` +
-    `Equity: $${f(accountEquity)} | DD ${dd}%\n` +
-    `Position: ${pos}\n` +
-    `รวมทั้งหมด: ${trades.length} trades`);
+    `Equity: $${f(accountEquity)} | DD ${dd}%\n\n` +
+    perMarket +
+    `\n\nรวมทั้งหมด: ${trades.length} trades`);
 }
 
 // ═══════════════ STATS ═══════════════
@@ -476,10 +563,19 @@ function getStats() {
     for (let j = 0; j <= i; j++) { eq = trades[j].equity; if (eq > pk) pk = eq; if ((pk-eq)/pk > mdd) mdd = (pk-eq)/pk; }
     return mdd * 100;
   })).toFixed(1);
+  // แยกรายตลาด
+  const perMkt = SYMBOLS.map(sym => {
+    const tt = trades.filter(t => (t.symbol||'ETHUSDT') === sym);
+    if (!tt.length) return `${MARKETS[sym].label}: ยังไม่มี trade`;
+    const tw = tt.filter(t=>t.pnl>0);
+    const tp = tt.reduce((s,t)=>s+t.pnl,0);
+    return `${MARKETS[sym].label}: ${tt.length} | WR ${(tw.length/tt.length*100).toFixed(0)}% | $${f(tp)}`;
+  }).join('\n');
   return `รวม ${trades.length} | WR ${wr}% | PnL $${f(tot)}\n` +
     `Payoff ${payoff} | Kelly ${kelly}% | Avg ${avgR}R\n` +
     `ถือเฉลี่ย ${avgHold}h | DD ${dd}% (max ${ddMax}%)\n` +
-    `Equity $${f(accountEquity)} (เริ่ม $${ACCOUNT_SIZE}, ${((accountEquity/ACCOUNT_SIZE-1)*100).toFixed(1)}%)`;
+    `Equity $${f(accountEquity)} (เริ่ม $${ACCOUNT_SIZE}, ${((accountEquity/ACCOUNT_SIZE-1)*100).toFixed(1)}%)\n\n` +
+    `── รายตลาด ──\n${perMkt}`;
 }
 
 // ═══════════════ TELEGRAM COMMANDS ═══════════════
@@ -492,28 +588,38 @@ async function pollTelegram() {
       lastUpdateId = u.update_id;
       const text = (u.message?.text || '').trim().toLowerCase();
       if (text === '/stats' || text === '/status') {
-        const pos = position ? `\n\n📍 Position: ${position.dir.toUpperCase()} @ $${f(position.entry)} SL $${f(position.sl)}` : '\n\n📍 FLAT (รอ signal)';
-        await tg(`🐢 <b>ETH Turtle Pro ${BOT_VERSION}</b>\n\n${getStats()}${pos}${halted ? '\n\n🛑 HALTED (max DD)' : ''}`);
+        const openList = SYMBOLS.filter(s2 => positions[s2]);
+        const pos = openList.length
+          ? '\n\n📍 ' + openList.map(s2 => `${MARKETS[s2].label} ${positions[s2].dir.toUpperCase()} @ $${f(positions[s2].entry)}`).join('\n📍 ')
+          : '\n\n📍 FLAT ทุกตลาด';
+        await tg(`🐢 <b>Turtle Pro ${BOT_VERSION}</b> (${SYMBOLS.map(s2=>MARKETS[s2].label).join('+')})\n\n${getStats()}${pos}${halted ? '\n\n🛑 HALTED (max DD)' : ''}`);
       } else if (text === '/position' || text === '/pos') {
-        // ดูสถานะ position ปัจจุบัน (กำไรลอย real-time)
-        let price = position ? position.entry : 0;
-        try { price = await fetchPrice(); } catch {}
-        await tg(buildPositionReport(price));
+        const prices = {};
+        for (const sym of SYMBOLS) { try { prices[sym] = await fetchPrice(sym); } catch {} }
+        await tg(buildAllPositionsReport(prices));
       } else if (text === '/close' || text === '/exit') {
-        // สั่งปิด position เอง (manual close ด้วยราคาตลาด)
-        if (!position) {
-          await tg('📍 ไม่มี position ให้ปิด (FLAT อยู่)');
+        const openList = SYMBOLS.filter(s2 => positions[s2]);
+        if (!openList.length) {
+          await tg('📍 ไม่มี position ให้ปิด (FLAT ทุกตลาด)');
         } else {
-          await tg(`⚠️ ยืนยันปิด ${position.dir.toUpperCase()} @ $${f(position.entry)}?\n\nพิมพ์ /close_yes เพื่อยืนยัน (ปิดด้วยราคาตลาดทันที)\nหรือปล่อยให้ trail จัดการต่อ`);
+          const lines = openList.map(s2 => `/close_${MARKETS[s2].label.toLowerCase()} → ปิด ${MARKETS[s2].label} ${positions[s2].dir.toUpperCase()} @ $${f(positions[s2].entry)}`);
+          await tg(`⚠️ <b>เลือกตลาดที่จะปิด</b>\n\n${lines.join('\n')}\n\n/close_all → ปิดทุกตลาด`);
         }
-      } else if (text === '/close_yes') {
-        if (!position) {
-          await tg('📍 ไม่มี position ให้ปิด');
+      } else if (text.startsWith('/close_')) {
+        const arg = text.slice(7).toLowerCase();
+        const targets = arg === 'all'
+          ? SYMBOLS.filter(s2 => positions[s2])
+          : SYMBOLS.filter(s2 => MARKETS[s2].label.toLowerCase() === arg && positions[s2]);
+        if (!targets.length) {
+          await tg('📍 ไม่พบ position ที่ตรงกับคำสั่ง');
         } else {
-          let price = position.entry;
-          try { price = await fetchPrice(); } catch {}
-          await closePosition(price, 'MANUAL_CLOSE');
-          await tg('✅ ปิด position เองแล้ว (manual)');
+          for (const sym of targets) {
+            let price = positions[sym].entry;
+            try { price = await fetchPrice(sym); } catch {}
+            await closePosition(sym, price, 'MANUAL_CLOSE');
+          }
+          saveState();
+          await tg(`✅ ปิด ${targets.map(s2=>MARKETS[s2].label).join(', ')} แล้ว (manual)`);
         }
       } else if (text === '/export' || text === '/log') {
         // สร้าง CSV วิเคราะห์ละเอียด — จับคู่ด้วย trade number (แม่นยำ 100%)
@@ -535,7 +641,7 @@ async function pollTelegram() {
             });
           } catch {}
 
-          let csv = 'num,entry_time,exit_time,dir,entry,exit,pnl,R,reason,held_h,mfe,mae,peakPrice,tradesSurge,tp2Hit,tp2Pnl,tp2Diff,equity\n';
+          let csv = 'num,symbol,entry_time,exit_time,dir,entry,exit,pnl,R,reason,held_h,mfe,mae,peakPrice,tradesSurge,tp2Hit,tp2Pnl,tp2Diff,equity\n';
           let matchedSurge = 0, unmatchedSurge = 0;
           trades.forEach(t => {
             // จับคู่ ml — วิธี 1: exitTs ตรงเป๊ะ / วิธี 2: fallback ตรวจ dir+pnl ให้ตรง
@@ -556,7 +662,7 @@ async function pollTelegram() {
             let exitT = t.exitTs ? new Date(t.exitTs).toISOString() : '';
             if (!entryT && csvTimeByNum[t.num]) entryT = csvTimeByNum[t.num].entry;
             if (!exitT && csvTimeByNum[t.num]) exitT = csvTimeByNum[t.num].exit;
-            csv += [t.num, entryT, exitT, t.dir, t.entry, t.exit, t.pnl, t.rMultiple, t.reason, t.bars,
+            csv += [t.num, t.symbol||'ETHUSDT', entryT, exitT, t.dir, t.entry, t.exit, t.pnl, t.rMultiple, t.reason, t.bars,
                     t.mfe, t.mae, t.peakPrice??'', surge??'', t.tp2Hit??'', t.tp2Pnl??'', t.tp2Diff??'', t.equity].join(',') + '\n';
           });
 
@@ -583,6 +689,14 @@ async function pollTelegram() {
           csv += `long_trades,${longs.length}\nlong_pnl,${longPnl.toFixed(2)}\n`;
           csv += `short_trades,${shorts.length}\nshort_pnl,${shortPnl.toFixed(2)}\n`;
           csv += `equity,${accountEquity.toFixed(2)}\npeak_equity,${peakEquity.toFixed(2)}\n`;
+          csv += '\n--- PER MARKET ---\n';
+          SYMBOLS.forEach(sym => {
+            const tt = trades.filter(t => (t.symbol||'ETHUSDT') === sym);
+            const tw = tt.filter(t=>t.pnl>0);
+            csv += `${MARKETS[sym].label}_trades,${tt.length}\n`;
+            csv += `${MARKETS[sym].label}_pnl,${tt.reduce((a,t)=>a+t.pnl,0).toFixed(2)}\n`;
+            csv += `${MARKETS[sym].label}_win_rate,${tt.length?(tw.length/tt.length*100).toFixed(1):0}%\n`;
+          });
           csv += `max_drawdown,${peakEquity>0?((peakEquity-accountEquity)/peakEquity*100).toFixed(1):0}%\n`;
           // ── DATA INTEGRITY (ตรวจความครบถ้วน) ──
           csv += '\n--- DATA INTEGRITY ---\n';
@@ -606,7 +720,7 @@ async function pollTelegram() {
         await tg('▶️ Resume — เริ่มเทรดใหม่ (reset peak)');
         saveState();
       } else if (text === '/reset') {
-        position = null; trades = []; accountEquity = ACCOUNT_SIZE; peakEquity = ACCOUNT_SIZE; halted = false;
+        SYMBOLS.forEach(s2 => positions[s2] = null); trades = []; accountEquity = ACCOUNT_SIZE; peakEquity = ACCOUNT_SIZE; halted = false;
         await tg('🔄 Reset — เริ่มใหม่ทั้งหมด');
         saveState();
       }
@@ -618,10 +732,9 @@ async function pollTelegram() {
 const PORT = process.env.DONCHIAN_PORT || 3100;
 
 // cache ราคา+channel ล่าสุด (อัพเดตทุก checkSignal)
-let dashCache = { price: 0, channel: null, updatedAt: 0 };
+let dashCache = {};   // { ETHUSDT: {price, channel, atr, updatedAt}, SOLUSDT: {...} }
 
 function buildDashboardData() {
-  // stats
   const w = trades.filter(t => t.pnl > 0), l = trades.filter(t => t.pnl <= 0);
   const tot = trades.reduce((s, t) => s + t.pnl, 0);
   const aw = w.length ? w.reduce((s,t)=>s+t.pnl,0)/w.length : 0;
@@ -634,29 +747,56 @@ function buildDashboardData() {
   trades.forEach(t => { eq = t.equity; if (eq>pk) pk=eq; if ((pk-eq)/pk>mdd) mdd=(pk-eq)/pk; });
   const curDD = (peakEquity - accountEquity) / peakEquity * 100;
 
-  // floating pnl ของ position ปัจจุบัน
-  let posData = null;
-  if (position) {
-    const price = dashCache.price || position.entry;
-    const floatPnl = position.dir==='long' ? (price-position.entry)*position.qty : (position.entry-price)*position.qty;
-    const heldH = Math.round((Date.now() - position.entryTs)/3600000);
-    const locked = position.dir==='long' ? position.sl>position.entry : position.sl<position.entry;
-    const lockedPnl = locked ? (position.dir==='long' ? (position.sl-position.entry)*position.qty : (position.entry-position.sl)*position.qty) : 0;
-    posData = {
-      dir: position.dir, entry: position.entry, price, sl: position.sl, peak: position.peak,
-      qty: position.qty, heldH, floatPnl: +floatPnl.toFixed(2), lockedPnl: +lockedPnl.toFixed(2),
-      features: position.features || null
+  // ข้อมูลรายตลาด
+  const markets = {};
+  let totalFloat = 0;
+  for (const sym of SYMBOLS) {
+    const cfg = MARKETS[sym];
+    const p = positions[sym];
+    const cache = dashCache[sym] || {};
+    let posData = null;
+    if (p) {
+      const price = cache.price || p.entry;
+      const floatPnl = p.dir==='long' ? (price-p.entry)*p.qty : (p.entry-price)*p.qty;
+      totalFloat += floatPnl;
+      const locked = p.dir==='long' ? p.sl>p.entry : p.sl<p.entry;
+      const lockedPnl = locked ? (p.dir==='long' ? (p.sl-p.entry)*p.qty : (p.entry-p.sl)*p.qty) : 0;
+      posData = {
+        dir: p.dir, entry: p.entry, price, sl: p.sl, peak: p.peak, qty: p.qty,
+        heldH: Math.round((Date.now()-p.entryTs)/3600000),
+        floatPnl: +floatPnl.toFixed(2), lockedPnl: +lockedPnl.toFixed(2),
+        riskAmt: p.riskAmt, beDone: !!p.beDone, features: p.features || null
+      };
+    }
+    const mt = trades.filter(t => (t.symbol||'ETHUSDT') === sym);
+    const mw = mt.filter(t => t.pnl>0);
+    markets[sym] = {
+      label: cfg.label,
+      config: { entryPeriod: cfg.entryPeriod, exitPeriod: cfg.exitPeriod,
+                trailATR: cfg.trailATR, breakevenAtR: cfg.breakevenAtR },
+      price: cache.price ? +cache.price.toFixed(2) : null,
+      atr: cache.atr ?? null,
+      channel: cache.channel || null,
+      updatedAt: cache.updatedAt || 0,
+      position: posData,
+      stats: {
+        trades: mt.length,
+        wr: mt.length ? Math.round(mw.length/mt.length*100) : 0,
+        pnl: +mt.reduce((a,t)=>a+t.pnl,0).toFixed(2)
+      }
     };
   }
 
   return {
     mode: 'paper',
     version: BOT_VERSION,
+    symbols: SYMBOLS,
     equity: +accountEquity.toFixed(2),
     start: ACCOUNT_SIZE,
     peakEquity: +peakEquity.toFixed(2),
+    floatPnl: +totalFloat.toFixed(2),
     halted,
-    position: posData,
+    markets,
     stats: {
       wr: trades.length ? Math.round(W*100) : 0,
       kelly: kelly==null ? null : Math.round(kelly),
@@ -666,13 +806,13 @@ function buildDashboardData() {
       trades: trades.length
     },
     trades: trades.map(t => ({
-      n: t.num, dir: t.dir, entry: t.entry, exit: t.exit,
+      n: t.num, symbol: t.symbol||'ETHUSDT', label: t.label || (MARKETS[t.symbol]?.label) || 'ETH',
+      dir: t.dir, entry: t.entry, exit: t.exit,
       pnl: t.pnl, r: t.rMultiple, reason: t.reason==='DONCHIAN_EXIT'?'DONCHIAN':'TRAIL_SL',
       held: t.bars, mfe: t.mfe, peakPrice: t.peakPrice,
-      entryTs: t.entryTs, exitTs: t.exitTs   // เวลา (สำหรับ chart)
+      entryTs: t.entryTs, exitTs: t.exitTs
     })),
-    channel: dashCache.channel,
-    updatedAt: dashCache.updatedAt
+    updatedAt: Math.max(...SYMBOLS.map(s2 => dashCache[s2]?.updatedAt || 0), 0)
   };
 }
 
@@ -696,28 +836,35 @@ http.createServer((req, res) => {
 
 // ═══════════════ STARTUP ═══════════════
 loadState();
-console.log(`🐢 ETH Turtle Pro ${BOT_VERSION} — D${ENTRY_PERIOD}/exit${EXIT_PERIOD}/trail${TRAIL_ATR}`);
-console.log(`Risk ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity.toFixed(2)} | Mode: ${live.modeLabel()}`);
-// ตั้ง leverage ถ้า live
+const mktSummary = SYMBOLS.map(s2 => {
+  const c = MARKETS[s2];
+  return `${c.label}: D${c.entryPeriod}/x${c.exitPeriod}/ATR×${c.trailATR}/BE+${c.breakevenAtR}R`;
+}).join('\n');
+console.log(`🐢 Turtle Pro ${BOT_VERSION} — Multi-Market (${SYMBOLS.map(s2=>MARKETS[s2].label).join('+')})`);
+console.log(mktSummary.split('\n').map(x=>'   '+x).join('\n'));
+console.log(`Risk ${RISK_PER_TRADE*100}%/trade (equity รวม) | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity.toFixed(2)} | Mode: ${live.modeLabel()}`);
 if (live.isEnabled()) { live.setLeverage(); }
 const modeWarning = live.isEnabled()
   ? `\n\n🔴 <b>LIVE MODE: ${live.modeLabel()}</b> — ส่ง order จริง!`
   : `\n\n⚠️ PAPER MODE (ยังไม่ส่ง order จริง)`;
-tg(`🐢 <b>ETH Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\nStrategy: D40 breakout + trail ATR×3 + exit D20\nRisk: ${RISK_PER_TRADE*100}%/trade | MaxDD ${MAX_DRAWDOWN_PCT*100}%\nEquity: $${accountEquity}${modeWarning}`);
+tg(`🐢 <b>Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\n` +
+   `<b>Markets:</b>\n${mktSummary}\n\n` +
+   `Risk: ${RISK_PER_TRADE*100}%/trade (equity รวม)\nMaxDD: ${MAX_DRAWDOWN_PCT*100}%\n` +
+   `Equity: $${accountEquity.toFixed(2)}${modeWarning}`);
 
-// loop ทุก 1 นาที (paper แม่นขึ้น — ข้าม SL น้อยลง, ใกล้ live)
-checkSignal();
-setInterval(checkSignal, 60 * 1000);
+// loop ทุก 1 นาที — เช็คทุกตลาด
+checkAllMarkets();
+setInterval(checkAllMarkets, 60 * 1000);
 setInterval(pollTelegram, 3000);
 setInterval(saveState, 60 * 1000);
 
-// Daily summary ทุกวัน 20:00 (เวลาไทย ~13:00 UTC)
+// Daily summary ทุกวัน 20:00 ไทย (13:00 UTC)
 let lastSummaryDay = '';
 setInterval(async () => {
   const now = new Date();
   const utcH = now.getUTCHours();
   const day = now.toISOString().slice(0, 10);
-  if (utcH === 13 && day !== lastSummaryDay) {   // 13 UTC = 20:00 ไทย
+  if (utcH === 13 && day !== lastSummaryDay) {
     lastSummaryDay = day;
     await sendDailySummary();
   }
