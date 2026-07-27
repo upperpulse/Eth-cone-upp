@@ -201,6 +201,8 @@ function viewOverview(S){
          <div class="kv">
            <div><div class="k">Stop Loss</div><div class="v mono">$${fmt(p.sl)}${p.beDone?' <span class="lock-pill">🛡</span>':''}</div></div>
            <div><div class="k">Peak</div><div class="v mono">$${fmt(p.peak)}</div></div>
+           <div><div class="k">🔒 กำไรที่ล็อก</div><div class="v mono ${p.lockedPnl>0?'green':''}">${p.lockedPnl>0?fmtUSD(p.lockedPnl):'—'}</div></div>
+           <div><div class="k">ถือมา</div><div class="v mono">${p.heldH}h</div></div>
          </div>`
       : `<div class="pos-empty">📍 FLAT — รอ breakout<div style="font-size:11px;margin-top:6px">ราคา $${fmt(m.price)}</div></div>`;
     cards += `<div class="panel">
