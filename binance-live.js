@@ -1,26 +1,25 @@
 // ═══════════════════════════════════════════════════════════
-//  binance-live.js — Binance Futures Order Module
-//  ⚠️ ปิดไว้ default (LIVE_MODE=false) — เปิดตอน Phase 4 เท่านั้น
-//  รองรับ Testnet (เทสก่อน mainnet)
+//  binance-live.js v2 — Binance Futures Order Module (Multi-Symbol)
+//  ⚠️ ปิดไว้ default (LIVE_MODE=false) — เปิดตอนพร้อมเทรด testnet
+//  รองรับ: Testnet + หลายเหรียญพร้อมกัน (ETH+SOL)
 // ═══════════════════════════════════════════════════════════
 const crypto = require('crypto');
 
-// ── CONFIG (จาก env) ──
-const LIVE_MODE   = process.env.LIVE_MODE === 'true';        // เปิด live (default false = paper)
-const USE_TESTNET = process.env.USE_TESTNET !== 'false';     // default true (ปลอดภัย)
+const LIVE_MODE   = process.env.LIVE_MODE === 'true';
+const USE_TESTNET = process.env.USE_TESTNET !== 'false';     // default true (ปลอดภัย!)
 const API_KEY     = process.env.BINANCE_KEY || '';
 const API_SECRET  = process.env.BINANCE_SECRET || '';
-const SYMBOL      = process.env.SYMBOL || 'ETHUSDT';
 const LEVERAGE    = parseInt(process.env.LEVERAGE || '3');
 
-// Testnet vs Mainnet URL
-const BASE = USE_TESTNET
-  ? 'https://testnet.binancefuture.com'
-  : 'https://fapi.binance.com';
+const BASE = USE_TESTNET ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com';
 
-// ── สถานะ module ──
 let enabled = !!(LIVE_MODE && API_KEY && API_SECRET);
-let lastStopOrderId = null;   // เก็บ order id ของ SL ปัจจุบัน (สำหรับ cancel)
+const lastStopOrderId = {};   // แยก SL order id ต่อเหรียญ (สำคัญ!)
+
+const QTY_PRECISION = { ETHUSDT: 3, SOLUSDT: 0, BTCUSDT: 3 };
+const PRICE_PRECISION = { ETHUSDT: 2, SOLUSDT: 4, BTCUSDT: 1 };
+const qStep = sym => QTY_PRECISION[sym] ?? 3;
+const pStep = sym => PRICE_PRECISION[sym] ?? 2;
 
 function isEnabled() { return enabled; }
 function modeLabel() {
@@ -28,151 +27,114 @@ function modeLabel() {
   if (!API_KEY || !API_SECRET) return 'PAPER (ไม่มี key)';
   return USE_TESTNET ? 'LIVE-TESTNET' : 'LIVE-MAINNET';
 }
+function sign(q) { return crypto.createHmac('sha256', API_SECRET).update(q).digest('hex'); }
 
-// ── HMAC SHA256 signature ──
-function sign(queryString) {
-  return crypto.createHmac('sha256', API_SECRET).update(queryString).digest('hex');
-}
-
-// ── signed request ──
 async function binanceRequest(method, path, params = {}) {
   if (!enabled) throw new Error('Live mode disabled');
-  const ts = Date.now();
-  const query = new URLSearchParams({ ...params, timestamp: ts, recvWindow: 5000 }).toString();
-  const signature = sign(query);
-  const url = `${BASE}${path}?${query}&signature=${signature}`;
-  const res = await fetch(url, {
-    method,
-    headers: { 'X-MBX-APIKEY': API_KEY }
-  });
+  const query = new URLSearchParams({ ...params, timestamp: Date.now(), recvWindow: 5000 }).toString();
+  const url = `${BASE}${path}?${query}&signature=${sign(query)}`;
+  const res = await fetch(url, { method, headers: { 'X-MBX-APIKEY': API_KEY } });
   const data = await res.json();
-  if (data.code && data.code < 0) {
-    throw new Error(`Binance ${data.code}: ${data.msg}`);
-  }
+  if (data.code && data.code < 0) throw new Error(`Binance ${data.code}: ${data.msg}`);
   return data;
 }
 
-// ── ตั้ง leverage (เรียกครั้งเดียวตอนเริ่ม) ──
-async function setLeverage() {
+async function setLeverage(symbols = ['ETHUSDT', 'SOLUSDT']) {
   if (!enabled) return;
-  try {
-    await binanceRequest('POST', '/fapi/v1/leverage', { symbol: SYMBOL, leverage: LEVERAGE });
-    console.log(`[LIVE] leverage set ${LEVERAGE}x`);
-  } catch (e) { console.error('[LIVE] setLeverage:', e.message); }
+  for (const symbol of symbols) {
+    try {
+      await binanceRequest('POST', '/fapi/v1/leverage', { symbol, leverage: LEVERAGE });
+      console.log(`[LIVE] ${symbol} leverage ${LEVERAGE}x`);
+    } catch (e) { console.error(`[LIVE] setLeverage ${symbol}:`, e.message); }
+  }
 }
 
-// ── เปิด/ปิด position (MARKET) ──
-// side: 'BUY' (long/close-short) | 'SELL' (short/close-long)
-async function placeMarketOrder(side, qty, reduceOnly = false) {
-  if (!enabled) return { simulated: true, side, qty };
-  const params = {
-    symbol: SYMBOL, side, type: 'MARKET',
-    quantity: qty.toFixed(3)
-  };
+async function placeMarketOrder(symbol, side, qty, reduceOnly = false) {
+  if (!enabled) return { simulated: true, symbol, side, qty };
+  const params = { symbol, side, type: 'MARKET', quantity: qty.toFixed(qStep(symbol)) };
   if (reduceOnly) params.reduceOnly = 'true';
   const order = await binanceRequest('POST', '/fapi/v1/order', params);
-  console.log(`[LIVE] MARKET ${side} ${qty.toFixed(3)} → orderId ${order.orderId}`);
+  console.log(`[LIVE] ${symbol} MARKET ${side} ${qty.toFixed(qStep(symbol))} → ${order.orderId}`);
   return order;
 }
 
-// ── ตั้ง STOP order (SL) ──
-// side ตรงข้ามกับ position: long → SELL stop, short → BUY stop
-async function placeStopOrder(side, qty, stopPrice) {
-  if (!enabled) return { simulated: true, side, stopPrice };
-  const params = {
-    symbol: SYMBOL, side, type: 'STOP_MARKET',
-    quantity: qty.toFixed(3),
-    stopPrice: stopPrice.toFixed(2),
-    reduceOnly: 'true'
-  };
+async function placeStopOrder(symbol, side, qty, stopPrice) {
+  if (!enabled) return { simulated: true, symbol, side, stopPrice };
+  const params = { symbol, side, type: 'STOP_MARKET', quantity: qty.toFixed(qStep(symbol)),
+                   stopPrice: stopPrice.toFixed(pStep(symbol)), reduceOnly: 'true' };
   const order = await binanceRequest('POST', '/fapi/v1/order', params);
-  lastStopOrderId = order.orderId;
-  console.log(`[LIVE] STOP ${side} @ ${stopPrice.toFixed(2)} → orderId ${order.orderId}`);
+  lastStopOrderId[symbol] = order.orderId;
+  console.log(`[LIVE] ${symbol} STOP ${side} @ ${stopPrice.toFixed(pStep(symbol))} → ${order.orderId}`);
   return order;
 }
 
-// ── ยกเลิก order ──
-async function cancelOrder(orderId) {
+async function cancelOrder(symbol, orderId) {
   if (!enabled || !orderId) return;
   try {
-    await binanceRequest('DELETE', '/fapi/v1/order', { symbol: SYMBOL, orderId });
-    console.log(`[LIVE] cancelled order ${orderId}`);
-  } catch (e) {
-    // order อาจถูก fill/cancel ไปแล้ว — ไม่ใช่ error ร้ายแรง
-    console.log(`[LIVE] cancel ${orderId}: ${e.message}`);
-  }
+    await binanceRequest('DELETE', '/fapi/v1/order', { symbol, orderId });
+    console.log(`[LIVE] ${symbol} cancelled ${orderId}`);
+  } catch (e) { console.log(`[LIVE] ${symbol} cancel ${orderId}: ${e.message}`); }
 }
 
-// ── Trailing SL (cancel เก่า + ตั้งใหม่) ──
-// ตั้งใหม่ "ก่อน" cancel เก่า (กันช่วงไม่มี SL)
-async function trailStopLive(side, qty, newStopPrice) {
+async function trailStopLive(side, qty, newStopPrice, symbol) {
   if (!enabled) return { simulated: true };
-  const oldId = lastStopOrderId;
+  const oldId = lastStopOrderId[symbol];
   try {
-    // ตั้ง SL ใหม่ก่อน
-    const newOrder = await placeStopOrder(side, qty, newStopPrice);
-    // แล้วค่อย cancel เก่า
-    if (oldId && oldId !== newOrder.orderId) await cancelOrder(oldId);
+    const newOrder = await placeStopOrder(symbol, side, qty, newStopPrice);
+    if (oldId && oldId !== newOrder.orderId) await cancelOrder(symbol, oldId);
     return newOrder;
-  } catch (e) {
-    console.error('[LIVE] trailStop:', e.message);
-    return { error: e.message };
-  }
+  } catch (e) { console.error(`[LIVE] ${symbol} trailStop:`, e.message); return { error: e.message }; }
 }
 
-// ── เปิด position เต็มชุด (market + SL) ──
-async function openLive(dir, qty, stopPrice) {
-  if (!enabled) return { simulated: true, dir, qty, stopPrice };
+async function openLive(dir, qty, stopPrice, symbol) {
+  if (!enabled) return { simulated: true, dir, qty, stopPrice, symbol };
   try {
     const entrySide = dir === 'long' ? 'BUY' : 'SELL';
     const stopSide  = dir === 'long' ? 'SELL' : 'BUY';
-    const entry = await placeMarketOrder(entrySide, qty);
-    const stop  = await placeStopOrder(stopSide, qty, stopPrice);
+    const entry = await placeMarketOrder(symbol, entrySide, qty);
+    const stop  = await placeStopOrder(symbol, stopSide, qty, stopPrice);
     return { entry, stop };
-  } catch (e) {
-    console.error('[LIVE] openLive:', e.message);
-    return { error: e.message };
-  }
+  } catch (e) { console.error(`[LIVE] ${symbol} openLive:`, e.message); return { error: e.message }; }
 }
 
-// ── ปิด position เต็มชุด (cancel SL + market close) ──
-async function closeLive(dir, qty) {
+async function closeLive(dir, qty, symbol) {
   if (!enabled) return { simulated: true };
   try {
-    if (lastStopOrderId) await cancelOrder(lastStopOrderId);
-    lastStopOrderId = null;
+    if (lastStopOrderId[symbol]) await cancelOrder(symbol, lastStopOrderId[symbol]);
+    lastStopOrderId[symbol] = null;
     const closeSide = dir === 'long' ? 'SELL' : 'BUY';
-    const close = await placeMarketOrder(closeSide, qty, true);  // reduceOnly
+    const close = await placeMarketOrder(symbol, closeSide, qty, true);
     return { close };
-  } catch (e) {
-    console.error('[LIVE] closeLive:', e.message);
-    return { error: e.message };
-  }
+  } catch (e) { console.error(`[LIVE] ${symbol} closeLive:`, e.message); return { error: e.message }; }
 }
 
-// ── เช็ค position จริงบน Binance (sync ตอนเริ่ม) ──
-async function getPositionLive() {
+async function getPositionLive(symbol) {
   if (!enabled) return null;
   try {
-    const positions = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol: SYMBOL });
-    const pos = positions.find(p => p.symbol === SYMBOL && parseFloat(p.positionAmt) !== 0);
+    const positions = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol });
+    const pos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
     if (!pos) return null;
-    return {
-      dir: parseFloat(pos.positionAmt) > 0 ? 'long' : 'short',
-      qty: Math.abs(parseFloat(pos.positionAmt)),
-      entry: parseFloat(pos.entryPrice),
-      unrealizedPnl: parseFloat(pos.unRealizedProfit)
-    };
-  } catch (e) {
-    console.error('[LIVE] getPosition:', e.message);
-    return null;
-  }
+    return { dir: parseFloat(pos.positionAmt) > 0 ? 'long' : 'short',
+             qty: Math.abs(parseFloat(pos.positionAmt)),
+             entry: parseFloat(pos.entryPrice),
+             unrealizedPnl: parseFloat(pos.unRealizedProfit) };
+  } catch (e) { console.error(`[LIVE] ${symbol} getPosition:`, e.message); return null; }
+}
+
+async function testConnection() {
+  if (!enabled) return { ok: false, reason: 'disabled (ยังไม่เปิด LIVE_MODE หรือไม่มี key)' };
+  try {
+    const acct = await binanceRequest('GET', '/fapi/v2/account', {});
+    const usdt = acct.assets?.find(a => a.asset === 'USDT');
+    return { ok: true, mode: modeLabel(),
+             balance: usdt ? parseFloat(usdt.walletBalance) : 0,
+             available: usdt ? parseFloat(usdt.availableBalance) : 0 };
+  } catch (e) { return { ok: false, reason: e.message }; }
 }
 
 module.exports = {
   isEnabled, modeLabel, setLeverage,
   openLive, closeLive, trailStopLive,
-  placeMarketOrder, placeStopOrder, cancelOrder, getPositionLive,
-  // export สำหรับ test
-  _sign: sign, _config: { LIVE_MODE, USE_TESTNET, BASE, SYMBOL, LEVERAGE }
+  placeMarketOrder, placeStopOrder, cancelOrder, getPositionLive, testConnection,
+  _sign: sign, _config: { LIVE_MODE, USE_TESTNET, BASE, LEVERAGE }
 };
