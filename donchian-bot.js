@@ -1,3 +1,4 @@
+require('dotenv').config();  // โหลด .env (TG token + Binance testnet key)
 // ═══════════════════════════════════════════════════════════
 //  TURTLE PRO v2.0 — Multi-Market Trend-Following
 //  Markets: ETH + SOL (parameter แยกต่อเหรียญ, equity แชร์กัน)
@@ -40,7 +41,7 @@ const MARKETS = {
   },
   SOLUSDT: {
     label: 'SOL',
-    enabled: true,
+    enabled: false,
     entryPeriod: 40,
     exitPeriod: 30,       // SOL: D30 $1,395 | OOS $402 | wf 5/5
     trailATR: 3.5,
@@ -843,7 +844,36 @@ const mktSummary = SYMBOLS.map(s2 => {
 console.log(`🐢 Turtle Pro ${BOT_VERSION} — Multi-Market (${SYMBOLS.map(s2=>MARKETS[s2].label).join('+')})`);
 console.log(mktSummary.split('\n').map(x=>'   '+x).join('\n'));
 console.log(`Risk ${RISK_PER_TRADE*100}%/trade (equity รวม) | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity.toFixed(2)} | Mode: ${live.modeLabel()}`);
-if (live.isEnabled()) { live.setLeverage(); }
+if (live.isEnabled()) { live.setLeverage(SYMBOLS); }
+
+// ── LIVE/TESTNET: sync equity + position จริงจาก Binance ตอนเริ่ม ──
+if (live.isEnabled() && live.testConnection) {
+  (async () => {
+    const conn = await live.testConnection();
+    if (conn.ok) {
+      console.log(`[LIVE] เชื่อมต่อ ${conn.mode} สำเร็จ | balance ${conn.balance} USDT | available ${conn.available}`);
+      // sync equity จาก balance จริง (ครั้งแรกเท่านั้น — ถ้า state ยังเป็นค่า default)
+      if (accountEquity === ACCOUNT_SIZE && conn.balance > 0) {
+        accountEquity = conn.balance;
+        peakEquity = conn.balance;
+        console.log(`[LIVE] sync equity → $${conn.balance} (จาก testnet balance)`);
+      }
+      // เช็ค position ค้างบน Binance (กัน bot กับ exchange ไม่ตรงกัน)
+      for (const sym of SYMBOLS) {
+        const livePos = await live.getPositionLive(sym);
+        if (livePos && !positions[sym]) {
+          console.log(`[LIVE] ⚠️ พบ position ${sym} บน Binance แต่ bot ไม่มี record: ${livePos.dir} ${livePos.qty} @ $${livePos.entry}`);
+          await tg(`⚠️ <b>${MARKETS[sym].label}: พบ position ค้างบน Binance</b>\n${livePos.dir.toUpperCase()} ${livePos.qty} @ $${livePos.entry}\n\nแนะนำปิดเองใน Binance ก่อน หรือ /close_${MARKETS[sym].label.toLowerCase()}`);
+        }
+      }
+      await tg(`🔗 <b>เชื่อมต่อ ${conn.mode}</b>\nBalance: ${conn.balance} USDT\nAvailable: ${conn.available} USDT`);
+    } else {
+      console.error(`[LIVE] เชื่อมต่อล้มเหลว: ${conn.reason}`);
+      await tg(`🔴 <b>เชื่อมต่อ Binance ล้มเหลว</b>\n${conn.reason}\n\nเช็ค API key/secret ใน .env`);
+    }
+  })();
+}
+
 const modeWarning = live.isEnabled()
   ? `\n\n🔴 <b>LIVE MODE: ${live.modeLabel()}</b> — ส่ง order จริง!`
   : `\n\n⚠️ PAPER MODE (ยังไม่ส่ง order จริง)`;
