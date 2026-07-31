@@ -88,13 +88,31 @@ async function trailStopLive(side, qty, newStopPrice, symbol) {
 
 async function openLive(dir, qty, stopPrice, symbol) {
   if (!enabled) return { simulated: true, dir, qty, stopPrice, symbol };
+  const out = { stopPlaced: false };
   try {
     const entrySide = dir === 'long' ? 'BUY' : 'SELL';
-    const stopSide  = dir === 'long' ? 'SELL' : 'BUY';
     const entry = await placeMarketOrder(symbol, entrySide, qty);
-    const stop  = await placeStopOrder(symbol, stopSide, qty, stopPrice);
-    return { entry, stop };
-  } catch (e) { console.error(`[LIVE] ${symbol} openLive:`, e.message); return { error: e.message }; }
+    out.entry = entry;
+    out.orderId = entry.orderId;
+    out.fillPrice = parseFloat(entry.avgPrice) || null;
+    out.fillQty = parseFloat(entry.executedQty) || null;
+    out.status = entry.status;
+  } catch (e) {
+    console.error(`[LIVE] ${symbol} entry order:`, e.message);
+    return { error: e.message, stopPlaced: false };
+  }
+  // SL แยก try — ถ้า entry สำเร็จแต่ SL ล้ม ต้องรู้ทันที (position เปลือย!)
+  try {
+    const stopSide = dir === 'long' ? 'SELL' : 'BUY';
+    const stop = await placeStopOrder(symbol, stopSide, qty, stopPrice);
+    out.stop = stop;
+    out.stopOrderId = stop.orderId;
+    out.stopPlaced = true;
+  } catch (e) {
+    console.error(`[LIVE] ${symbol} ⚠️ STOP ORDER FAILED:`, e.message);
+    out.stopError = e.message;
+  }
+  return out;
 }
 
 async function closeLive(dir, qty, symbol) {
@@ -104,7 +122,9 @@ async function closeLive(dir, qty, symbol) {
     lastStopOrderId[symbol] = null;
     const closeSide = dir === 'long' ? 'SELL' : 'BUY';
     const close = await placeMarketOrder(symbol, closeSide, qty, true);
-    return { close };
+    return { close, orderId: close.orderId,
+             fillPrice: parseFloat(close.avgPrice) || null,
+             fillQty: parseFloat(close.executedQty) || null };
   } catch (e) { console.error(`[LIVE] ${symbol} closeLive:`, e.message); return { error: e.message }; }
 }
 
@@ -119,6 +139,36 @@ async function getPositionLive(symbol) {
              entry: parseFloat(pos.entryPrice),
              unrealizedPnl: parseFloat(pos.unRealizedProfit) };
   } catch (e) { console.error(`[LIVE] ${symbol} getPosition:`, e.message); return null; }
+}
+
+// ── ดู order ที่ค้างอยู่ ──
+async function getOpenOrders(symbol) {
+  if (!enabled) return [];
+  try { return await binanceRequest('GET', '/fapi/v1/openOrders', symbol ? { symbol } : {}); }
+  catch (e) { console.error(`[LIVE] getOpenOrders:`, e.message); return []; }
+}
+
+// ── รับช่วง SL order ที่มีอยู่แล้วบน exchange (ใช้ตอน bot restart) ──
+// ถ้าไม่ทำ: bot จะลืม order เดิม → วาง SL ใหม่ทับ = มี SL ซ้อน 2 อัน
+async function adoptStopOrders(symbols = []) {
+  if (!enabled) return {};
+  const adopted = {};
+  for (const symbol of symbols) {
+    const orders = await getOpenOrders(symbol);
+    if (!Array.isArray(orders)) continue;
+    const stops = orders.filter(o => (o.type === 'STOP_MARKET' || o.type === 'STOP') && o.reduceOnly);
+    if (!stops.length) continue;
+    // เรียงใหม่สุดก่อน — ตัวใหม่สุดคือ SL ปัจจุบัน
+    stops.sort((a, b) => b.updateTime - a.updateTime);
+    lastStopOrderId[symbol] = stops[0].orderId;
+    adopted[symbol] = { orderId: stops[0].orderId, stopPrice: parseFloat(stops[0].stopPrice), duplicates: stops.length - 1 };
+    // มีซ้ำ (จาก restart ก่อนหน้า) → ลบตัวเก่าทิ้ง
+    for (let i = 1; i < stops.length; i++) {
+      await cancelOrder(symbol, stops[i].orderId);
+      console.log(`[LIVE] ${symbol} ลบ SL ซ้ำ ${stops[i].orderId} @ ${stops[i].stopPrice}`);
+    }
+  }
+  return adopted;
 }
 
 async function testConnection() {
@@ -136,5 +186,6 @@ module.exports = {
   isEnabled, modeLabel, setLeverage,
   openLive, closeLive, trailStopLive,
   placeMarketOrder, placeStopOrder, cancelOrder, getPositionLive, testConnection,
+  getOpenOrders, adoptStopOrders,
   _sign: sign, _config: { LIVE_MODE, USE_TESTNET, BASE, LEVERAGE }
 };
