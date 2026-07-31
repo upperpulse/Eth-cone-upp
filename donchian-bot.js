@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v2.5';
+const BOT_VERSION = 'v3.0';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -329,8 +329,38 @@ async function reconcile() {
         `bot: ไม่มีในระบบ\n\n` +
         `⚠️ ไม่มี SL ดูแล — แนะนำปิดเองใน Binance`);
     }
-    // มีทั้งคู่แต่ขนาด/ทิศไม่ตรง
+    // มีทั้งคู่ → เช็คว่า SL ยังอยู่บน exchange มั้ย (auto-recovery)
     else if (botPos && exPos) {
+      if (live.getOpenStops) {
+        try {
+          const stops = (await live.getOpenStops(symbol)).filter(o => o.symbol === symbol);
+          if (!stops.length) {
+            // SL หายไป (โดนลบ/หมดอายุ/restart) → วางกลับทันที
+            const stopSide = botPos.dir === 'long' ? 'SELL' : 'BUY';
+            const r = await live.placeStopOrder(symbol, stopSide, botPos.qty, botPos.sl);
+            if (r && !r.error) {
+              botPos.stopOrderId = r.orderId; botPos.slPlaced = true;
+              await logError('warn', 'SL_RESTORED', symbol,
+                `SL หายจาก exchange — วางกลับให้แล้วที่ $${f(botPos.sl)}`, { orderId: r.orderId });
+              await tg(`🔧 <b>${cfg.label}: กู้ SL คืนแล้ว</b>\nSL หายไปจาก Binance — วางกลับที่ $${f(botPos.sl)}`);
+            } else {
+              botPos.slPlaced = false;
+              await logError('critical', 'SL_RESTORE_FAILED', symbol,
+                `SL หายและวางกลับไม่ได้ — bot ต้องปิดเองถ้าถึงราคา`, { error: r && r.error });
+            }
+          } else {
+            botPos.slPlaced = true;
+            // ราคา SL บน exchange ต่างจากที่ bot คิดมาก → sync ใหม่
+            const diff = Math.abs(stops[0].stopPrice - botPos.sl);
+            if (diff > botPos.atr * 0.5) {
+              const stopSide = botPos.dir === 'long' ? 'SELL' : 'BUY';
+              await live.trailStopLive(stopSide, botPos.qty, botPos.sl, symbol);
+              await logError('warn', 'SL_PRICE_SYNC', symbol,
+                `SL บน exchange ($${stops[0].stopPrice}) ต่างจาก bot ($${f(botPos.sl)}) — sync ใหม่แล้ว`);
+            }
+          }
+        } catch (e) { await logError('warn', 'SL_CHECK_FAIL', symbol, e.message); }
+      }
       const dirMismatch = botPos.dir !== exPos.dir;
       const qtyDiff = Math.abs(botPos.qty - exPos.qty) / Math.max(botPos.qty, 0.0001);
       if (dirMismatch || qtyDiff > 0.02) {
@@ -1204,7 +1234,7 @@ tg(`🐢 <b>Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\n` +
 
 // ตรวจความตรงกันกับ Binance ทุก 15 นาที
 if (live.isEnabled()) {
-  setTimeout(() => { reconcile(); setInterval(reconcile, 15 * 60 * 1000); }, 30000);
+  setTimeout(() => { reconcile(); setInterval(reconcile, 5 * 60 * 1000); }, 30000);   // เช็คทุก 5 นาที (SL หาย = เรื่องใหญ่ ต้องเจอเร็ว)
 }
 
 // loop ทุก 1 นาที — เช็คทุกตลาด
