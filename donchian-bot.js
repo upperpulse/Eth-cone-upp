@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v3.0';
+const BOT_VERSION = 'v3.1';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -302,20 +302,39 @@ async function reconcile() {
   for (const symbol of SYMBOLS) {
     let exPos;
     try { exPos = await live.getPositionLive(symbol); }
-    catch (e) { await logError('warn', 'RECONCILE_FAIL', symbol, e.message); continue; }
+    catch (e) {
+      // เรียกไม่สำเร็จ ≠ ไม่มี position — ข้ามรอบนี้ ห้ามสรุปว่า desync
+      await logError('warn', 'RECONCILE_FAIL', symbol, `เช็ค position ไม่ได้ (ข้ามรอบนี้): ${e.message}`);
+      continue;
+    }
     const botPos = positions[symbol];
     const cfg = MARKETS[symbol];
 
-    // bot มี แต่ exchange ไม่มี = position ผี (หรือโดน SL ปิดไปแล้ว)
+    // bot มี แต่ exchange ไม่มี → ยืนยันซ้ำก่อน (กันเตือนผิดจาก API สะดุด)
     if (botPos && !exPos) {
+      await new Promise(r => setTimeout(r, 3000));
+      let confirm;
+      try { confirm = await live.getPositionLive(symbol); }
+      catch (e) {
+        await logError('warn', 'RECONCILE_FAIL', symbol, `ยืนยันครั้งที่ 2 ไม่สำเร็จ: ${e.message}`);
+        continue;
+      }
+      if (confirm) continue;   // ครั้งที่ 2 เจอ = false alarm ข้ามไป
+
+      // ยืนยันแล้วว่าไม่มีจริง → น่าจะโดน SL ปิด ปิดในระบบให้ตรงกัน
       health.desyncAlerts++;
-      await logError('critical', 'DESYNC_PHANTOM', symbol,
-        `bot คิดว่าถือ ${botPos.dir.toUpperCase()} แต่ Binance ไม่มี position — อาจโดน SL ปิดไปแล้ว`,
-        { botDir: botPos.dir, botQty: botPos.qty, botEntry: botPos.entry });
-      await tg(`🔴 <b>${cfg.label}: ข้อมูลไม่ตรงกัน</b>\n\n` +
-        `bot: ${botPos.dir.toUpperCase()} ${botPos.qty} @ $${f(botPos.entry)}\n` +
-        `Binance: ไม่มี position\n\n` +
-        `น่าจะโดน SL order ปิดไปแล้ว\nสั่ง /sync_${cfg.label.toLowerCase()} เพื่อล้างออกจากระบบ`);
+      const closePx = await (async () => {
+        try {
+          const kl = await fetchKlines(symbol, 2);
+          return Array.isArray(kl) && kl.length ? +kl[kl.length - 1][4] : botPos.sl;
+        } catch { return botPos.sl; }
+      })();
+      await logError('critical', 'POSITION_CLOSED_ON_EXCHANGE', symbol,
+        `Binance ไม่มี position แล้ว (ยืนยัน 2 ครั้ง) — น่าจะโดน SL ปิด บันทึกเป็น trade ที่ราคา $${f(closePx)}`,
+        { botDir: botPos.dir, botQty: botPos.qty, botEntry: botPos.entry, botSL: botPos.sl });
+      await closePosition(symbol, closePx, 'SL_FILLED_EXCHANGE');
+      saveState();
+      continue;
     }
     // exchange มี แต่ bot ไม่มี = position ตกค้าง ไม่มีใครดูแล 🔴
     else if (!botPos && exPos) {
@@ -629,7 +648,13 @@ async function closePosition(symbol, exit, reason) {
   const tp2Diff = +(tp2Pnl - pnl).toFixed(2);
 
   let exitFill = null, slipExit = null;
-  if (live.isEnabled()) {
+  // ถ้า exchange ปิด position ไปแล้ว (SL trigger) ห้ามส่ง market order ซ้ำ
+  // ไม่งั้นจะกลายเป็นเปิดไม้ใหม่ทางตรงข้าม!
+  const alreadyClosedOnExchange = (reason === 'SL_FILLED_EXCHANGE');
+  if (alreadyClosedOnExchange && live.cancelStop) {
+    try { await live.cancelStop(symbol, position.stopOrderId); } catch (e) {}
+  }
+  if (live.isEnabled() && !alreadyClosedOnExchange) {
     let closed = false, closeErr = null;
     // ลองปิด 3 ครั้ง (เผื่อเน็ต/API สะดุดชั่วคราว)
     for (let attempt = 1; attempt <= 3 && !closed; attempt++) {
@@ -898,7 +923,13 @@ async function pollTelegram() {
         if (!sym) { await tg('ไม่พบเหรียญนี้'); }
         else if (!positions[sym]) { await tg(`${MARKETS[sym].label} ไม่มี position ในระบบอยู่แล้ว`); }
         else {
-          const exPos = live.isEnabled() && live.getPositionLive ? await live.getPositionLive(sym) : null;
+          let exPos = null, checkFailed = false;
+          if (live.isEnabled() && live.getPositionLive) {
+            try { exPos = await live.getPositionLive(sym); }
+            catch (e) { checkFailed = true; }
+          }
+          if (checkFailed) { await tg(`⚠️ เช็ค Binance ไม่ได้ตอนนี้ — ไม่ล้าง position เพื่อความปลอดภัย ลองใหม่อีกครั้ง`); }
+          else
           if (exPos) { await tg(`⚠️ Binance ยังมี position อยู่ (${exPos.dir} ${exPos.qty})\nไม่ล้างให้ — ปิดใน Binance ก่อน`); }
           else {
             const p = positions[sym];
@@ -1155,6 +1186,16 @@ http.createServer((req, res) => {
       version: BOT_VERSION, equity: accountEquity, trades: trades.length,
       position: position ? position.dir : null, halted
     }));
+  } else if (req.url.split('?')[0] === '/ui' || req.url.split('?')[0] === '/') {
+    // เสิร์ฟหน้า dashboard ตรงจาก VM (ไม่ต้องพึ่ง GitHub Pages)
+    try {
+      const html = fs.readFileSync(DIR + '/turtle-dashboard.html', 'utf8');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(html);
+    } catch (e) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('ไม่พบ turtle-dashboard.html บน VM');
+    }
   } else if (req.url.split('?')[0] === '/dashboard') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(buildDashboardData()));
@@ -1210,7 +1251,9 @@ if (live.isEnabled() && live.testConnection) {
       }
       // เช็ค position ค้างบน Binance (กัน bot กับ exchange ไม่ตรงกัน)
       for (const sym of SYMBOLS) {
-        const livePos = await live.getPositionLive(sym);
+        let livePos = null;
+        try { livePos = await live.getPositionLive(sym); }
+        catch (e) { await logError('warn', 'STARTUP_POS_CHECK_FAIL', sym, e.message); continue; }
         if (livePos && !positions[sym]) {
           console.log(`[LIVE] ⚠️ พบ position ${sym} บน Binance แต่ bot ไม่มี record: ${livePos.dir} ${livePos.qty} @ $${livePos.entry}`);
           await tg(`⚠️ <b>${MARKETS[sym].label}: พบ position ค้างบน Binance</b>\n${livePos.dir.toUpperCase()} ${livePos.qty} @ $${livePos.entry}\n\nแนะนำปิดเองใน Binance ก่อน หรือ /close_${MARKETS[sym].label.toLowerCase()}`);

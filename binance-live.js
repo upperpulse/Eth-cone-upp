@@ -243,17 +243,20 @@ async function closeLive(dir, qty, symbol) {
   }
 }
 
+// คืน null = ไม่มี position จริง (ยืนยันแล้ว)
+// throw       = เรียกไม่สำเร็จ — ห้ามตีความว่า "ไม่มี position"!
 async function getPositionLive(symbol) {
   if (!enabled) return null;
-  try {
-    const positions = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol });
-    const pos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
-    if (!pos) return null;
-    return { dir: parseFloat(pos.positionAmt) > 0 ? 'long' : 'short',
-             qty: Math.abs(parseFloat(pos.positionAmt)),
-             entry: parseFloat(pos.entryPrice),
-             unrealizedPnl: parseFloat(pos.unRealizedProfit) };
-  } catch (e) { console.error(`[LIVE] ${symbol} getPosition:`, e.message); return null; }
+  const positions = await binanceRequest('GET', '/fapi/v2/positionRisk', { symbol });
+  if (!Array.isArray(positions)) {
+    throw new Error(`positionRisk ตอบผิดรูปแบบ: ${JSON.stringify(positions).slice(0, 120)}`);
+  }
+  const pos = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+  if (!pos) return null;
+  return { dir: parseFloat(pos.positionAmt) > 0 ? 'long' : 'short',
+           qty: Math.abs(parseFloat(pos.positionAmt)),
+           entry: parseFloat(pos.entryPrice),
+           unrealizedPnl: parseFloat(pos.unRealizedProfit) };
 }
 
 async function testConnection() {
