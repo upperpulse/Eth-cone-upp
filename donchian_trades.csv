@@ -1,2 +1,3 @@
 num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,sl_placed,efficiency_ratio,peak_bar,trough_bar
 1,ETHUSDT,2026-07-31T09:23:17.559Z,2026-08-01T05:05:14.587Z,short,1882.81,1869.56,1.0566,11.12,0.25,TRAIL_SL,20,36.78,-6.34,45,12.17,5011.12,LIVE-TESTNET,,,,,true,,,
+2,SOLUSDT,2026-07-31T18:39:51.702Z,2026-08-01T22:28:42.544Z,short,72.96,71.96,28,24.85,0.57,TRAIL_SL,28,64.12,-6.44,43.47,0.44,5035.97,LIVE-TESTNET,,,,,true,,0,0
