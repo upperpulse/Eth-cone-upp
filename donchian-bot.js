@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v3.2';
+const BOT_VERSION = 'v3.3';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -613,6 +613,7 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
       // เก็บราคา fill จริง → วัด slippage (paper ไม่มีข้อมูลนี้)
       const fp = r.fillPrice;
       positions[symbol].liveEntryFill = fp;
+      positions[symbol].entryFeeLive = r.fee ?? null;
       positions[symbol].entryOrderId = r.orderId || null;
       positions[symbol].stopOrderId = r.stopOrderId || null;
       positions[symbol].slPlaced = !!r.stopPlaced;
@@ -667,7 +668,7 @@ async function closePosition(symbol, exit, reason) {
   const tp2Pnl = tp2Hit ? riskAmt * 2 : pnl;
   const tp2Diff = +(tp2Pnl - pnl).toFixed(2);
 
-  let exitFill = null, slipExit = null;
+  let exitFill = null, slipExit = null, liveFeeExit = null, liveRealizedPnl = null;
   // ถ้า exchange ปิด position ไปแล้ว (SL trigger) ห้ามส่ง market order ซ้ำ
   // ไม่งั้นจะกลายเป็นเปิดไม้ใหม่ทางตรงข้าม!
   const alreadyClosedOnExchange = (reason === 'SL_FILLED_EXCHANGE');
@@ -686,6 +687,10 @@ async function closePosition(symbol, exit, reason) {
           exitFill = rc.fillPrice;
           const sa = dir === 'long' ? exit - exitFill : exitFill - exit;
           slipExit = +((sa / exit) * 10000).toFixed(2);
+        }
+        if (rc) {
+          liveFeeExit = rc.fee ?? null;
+          liveRealizedPnl = rc.realizedPnl ?? null;
         }
         if (attempt > 1) await logError('warn', 'CLOSE_RETRY_OK', symbol, `ปิดสำเร็จในครั้งที่ ${attempt}`);
       } catch (e) {
@@ -732,6 +737,11 @@ async function closePosition(symbol, exit, reason) {
     exitFill,
     slipEntryBps: position.slipEntryBps ?? null,
     slipExitBps: slipExit,
+    // ค่าจริงจาก Binance (เทียบกับที่ bot ประมาณเอง)
+    feeLive: (position.entryFeeLive != null || liveFeeExit != null)
+      ? +(((position.entryFeeLive || 0) + (liveFeeExit || 0))).toFixed(6) : null,
+    feeEstimate: +fee.toFixed(4),
+    pnlLive: liveRealizedPnl,
     slPlaced: position.slPlaced ?? null,
     entryOrderId: position.entryOrderId ?? null,
     // ── บริบทตลาด + จังหวะ ──
@@ -808,12 +818,12 @@ function logML(features, trade) {
 function logTradeCSV(t) {
   try {
     if (!fs.existsSync(TRADE_CSV)) {
-      fs.writeFileSync(TRADE_CSV, 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,sl_placed,efficiency_ratio,peak_bar,trough_bar\n');
+      fs.writeFileSync(TRADE_CSV, 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,fee_live,fee_estimate,pnl_live,sl_placed,efficiency_ratio,peak_bar,trough_bar\n');
     }
     const et = new Date(t.entryTs).toISOString();
     const xt = new Date(t.exitTs).toISOString();
     const nz = v => (v === null || v === undefined) ? '' : v;
-    const row = `${t.num},${t.symbol||'ETHUSDT'},${et},${xt},${t.dir},${t.entry},${t.exit},${t.qty},${t.pnl},${t.rMultiple},${t.reason},${t.bars},${t.mfe},${t.mae},${t.riskAmt},${t.atr},${t.equity},${nz(t.mode)},${nz(t.entryFill)},${nz(t.exitFill)},${nz(t.slipEntryBps)},${nz(t.slipExitBps)},${nz(t.slPlaced)},${nz(t.efficiencyRatio)},${nz(t.peakBar)},${nz(t.troughBar)}\n`;
+    const row = `${t.num},${t.symbol||'ETHUSDT'},${et},${xt},${t.dir},${t.entry},${t.exit},${t.qty},${t.pnl},${t.rMultiple},${t.reason},${t.bars},${t.mfe},${t.mae},${t.riskAmt},${t.atr},${t.equity},${nz(t.mode)},${nz(t.entryFill)},${nz(t.exitFill)},${nz(t.slipEntryBps)},${nz(t.slipExitBps)},${nz(t.feeLive)},${nz(t.feeEstimate)},${nz(t.pnlLive)},${nz(t.slPlaced)},${nz(t.efficiencyRatio)},${nz(t.peakBar)},${nz(t.troughBar)}\n`;
     fs.appendFileSync(TRADE_CSV, row);
   } catch (e) {}
 }

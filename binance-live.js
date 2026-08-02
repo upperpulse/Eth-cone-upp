@@ -68,6 +68,31 @@ async function placeMarketOrder(symbol, side, qty, reduceOnly = false) {
   return order;
 }
 
+// ── ดึงราคา fill จริง (MARKET order คืน avgPrice='0' ตอนแรก) ──
+// รวมทุก partial fill แล้วถัวเฉลี่ยถ่วงน้ำหนัก + คืน fee/realizedPnl ด้วย
+async function getFillPrice(symbol, orderId, retries = 3) {
+  if (!enabled || !orderId) return null;
+  for (let i = 0; i < retries; i++) {
+    await new Promise(r => setTimeout(r, 400 * (i + 1)));
+    try {
+      const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 20 });
+      if (!Array.isArray(trades)) continue;
+      const mine = trades.filter(t => String(t.orderId) === String(orderId));
+      if (!mine.length) continue;
+      let qty = 0, notional = 0, fee = 0, pnl = 0;
+      for (const t of mine) {
+        const q = parseFloat(t.qty), p = parseFloat(t.price);
+        qty += q; notional += q * p;
+        fee += parseFloat(t.commission || 0);
+        pnl += parseFloat(t.realizedPnl || 0);
+      }
+      if (qty > 0) return { price: +(notional / qty).toFixed(6), qty: +qty.toFixed(8),
+                            fee: +fee.toFixed(6), realizedPnl: +pnl.toFixed(6), fills: mine.length };
+    } catch (e) {}
+  }
+  return null;
+}
+
 // ══════════ STOP ORDER — ตรวจเองว่าใช้ API แบบไหน ══════════
 async function placeStopStandard(symbol, side, qty, stopPrice) {
   const data = await raw('POST', '/fapi/v1/order', {
@@ -241,6 +266,11 @@ async function openLive(dir, qty, stopPrice, symbol) {
     out.fillPrice = parseFloat(entry.avgPrice) || null;
     out.fillQty = parseFloat(entry.executedQty) || null;
     out.status = entry.status;
+    // MARKET order มักคืน avgPrice='0' → ดึงราคาจริงจาก userTrades
+    if (!out.fillPrice) {
+      const f = await getFillPrice(symbol, entry.orderId);
+      if (f) { out.fillPrice = f.price; out.fillQty = f.qty; out.fee = f.fee; out.fills = f.fills; }
+    }
   } catch (e) {
     console.error(`[LIVE] ${symbol} entry order:`, e.message);
     return { error: e.message, stopPlaced: false };
@@ -267,9 +297,14 @@ async function closeLive(dir, qty, symbol) {
     lastStop[symbol] = null;
     const closeSide = dir === 'long' ? 'SELL' : 'BUY';
     const close = await placeMarketOrder(symbol, closeSide, qty, true);
-    return { close, orderId: close.orderId,
-             fillPrice: parseFloat(close.avgPrice) || null,
-             fillQty: parseFloat(close.executedQty) || null };
+    let fillPrice = parseFloat(close.avgPrice) || null;
+    let fillQty = parseFloat(close.executedQty) || null;
+    let fee = null, realizedPnl = null, fills = null;
+    if (!fillPrice) {
+      const f = await getFillPrice(symbol, close.orderId);
+      if (f) { fillPrice = f.price; fillQty = f.qty; fee = f.fee; realizedPnl = f.realizedPnl; fills = f.fills; }
+    }
+    return { close, orderId: close.orderId, fillPrice, fillQty, fee, realizedPnl, fills };
   } catch (e) {
     console.error(`[LIVE] ${symbol} closeLive:`, e.message);
     return { error: e.message };
@@ -307,6 +342,6 @@ module.exports = {
   isEnabled, modeLabel, stopApiMode, setLeverage,
   openLive, closeLive, trailStopLive,
   placeMarketOrder, placeStopOrder, cancelOrder, cancelStop,
-  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops,
+  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops, getFillPrice,
   _sign: sign, _config: { LIVE_MODE, USE_TESTNET, BASE, LEVERAGE }
 };
