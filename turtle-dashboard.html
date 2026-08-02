@@ -86,6 +86,7 @@ th:first-child,td:first-child{text-align:left}
 .b-long{background:rgba(122,139,111,.28);color:var(--moss-dark)}
 .b-short{background:rgba(181,84,58,.2);color:var(--clay)}
 .b-mkt{background:rgba(62,47,28,.12);color:var(--bark);margin-right:4px}
+.tsm{font-size:11px;color:var(--bark-soft);white-space:nowrap}
 
 .foot{text-align:center;font-size:11px;color:var(--bark-soft);padding:14px 0 4px}
 .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--moss);margin-right:6px;animation:p 2s infinite}
@@ -105,6 +106,7 @@ th:first-child,td:first-child{text-align:left}
   .panel{padding:14px;border-radius:13px}
   .pos-pnl{font-size:28px}
   table{font-size:11px} th,td{padding:6px 5px}
+  .tsm{font-size:10px}
 }
 </style>
 </head>
@@ -142,6 +144,11 @@ const API_URL = 'https://upcountry-tint-unlucky.ngrok-free.dev';
 const $ = id => document.getElementById(id);
 const fmt = (n,d=2) => n==null||isNaN(n) ? '—' : (+n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtUSD = n => (n>=0?'+':'') + '$' + fmt(Math.abs(n));
+// เวลาไทย (UTC+7) — bot ส่ง timestamp เป็น ms
+const TZ = 7 * 3600000;
+const thDT = ts => { if(!ts) return '—'; const d=new Date(ts+TZ); return d.toISOString().slice(5,10).replace('-','/')+' '+d.toISOString().slice(11,16); };
+const thT  = ts => { if(!ts) return '—'; return new Date(ts+TZ).toISOString().slice(11,16); };
+const durH = (a,b) => (!a||!b) ? '—' : Math.round((b-a)/3600000)+'h';
 let STATE = null;
 let activeTab = 'overview';
 
@@ -366,6 +373,9 @@ function viewHistory(S){
     rows+=`<tr>
       <td>#${t.n} <span class="badge b-mkt">${t.label||'ETH'}</span></td>
       <td><span class="badge ${t.dir==='long'?'b-long':'b-short'}">${t.dir==='long'?'LONG':'SHORT'}</span></td>
+      <td class="mono tsm">${thDT(t.entryTs)}</td>
+      <td class="mono tsm">${thDT(t.exitTs)}</td>
+      <td class="mono">${t.held!=null?t.held+'h':durH(t.entryTs,t.exitTs)}</td>
       <td class="mono">$${fmt(t.entry)}</td>
       <td class="mono">$${fmt(t.exit)}</td>
       <td class="mono ${win?'green':'red'}">${fmtUSD(t.pnl)}</td>
@@ -384,7 +394,7 @@ function viewHistory(S){
     <div class="panel">
       <div class="panel-hd"><span class="panel-title">ตารางเทรด</span></div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>#</th><th>ทิศ</th><th>เข้า</th><th>ออก</th><th>PnL</th><th>R</th></tr></thead>
+        <thead><tr><th>#</th><th>ทิศ</th><th>เข้าเมื่อ</th><th>ออกเมื่อ</th><th>ถือ</th><th>เข้า</th><th>ออก</th><th>PnL</th><th>R</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>`;

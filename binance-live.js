@@ -16,6 +16,7 @@ let enabled = !!(LIVE_MODE && API_KEY && API_SECRET);
 
 // SL order ที่คุมอยู่ต่อเหรียญ: { id, isAlgo }
 const lastStop = {};
+const staleStops = {};   // symbol ที่เคยลบ SL ไม่สำเร็จ → ต้องกวาดรอบหน้า
 // โหมด stop order: 'unknown' → ตรวจครั้งแรก → 'standard' | 'algo'
 let stopMode = 'unknown';
 
@@ -123,15 +124,37 @@ async function placeStopOrder(symbol, side, qty, stopPrice) {
   return { orderId: result.id, algoId: result.isAlgo ? result.id : undefined, isAlgo: result.isAlgo };
 }
 
+// คืน true = ลบสำเร็จ (หรือไม่มีอยู่แล้ว), false = ลบไม่ได้
 async function cancelStop(symbol, ref) {
-  if (!enabled || !ref) return;
+  if (!enabled || !ref) return true;
   const id = typeof ref === 'object' ? ref.id : ref;
   const isAlgo = typeof ref === 'object' ? ref.isAlgo : (stopMode === 'algo');
   try {
     if (isAlgo) await binanceRequest('DELETE', '/fapi/v1/algoOrder', { symbol, algoId: id });
     else await binanceRequest('DELETE', '/fapi/v1/order', { symbol, orderId: id });
     console.log(`[LIVE] ${symbol} cancelled stop ${id}`);
-  } catch (e) { console.log(`[LIVE] ${symbol} cancel ${id}: ${e.message}`); }
+    return true;
+  } catch (e) {
+    // -2011 Unknown order = ไม่มีอยู่แล้ว ถือว่าสำเร็จ
+    if (/-2011|Unknown order/i.test(e.message)) return true;
+    console.log(`[LIVE] ${symbol} cancel ${id} ล้มเหลว: ${e.message}`);
+    return false;
+  }
+}
+
+// กวาด stop order ส่วนเกินให้เหลือแค่ keepId (หรือลบหมดถ้า keepId=null)
+// ป้องกัน order สะสมจาก trail ที่ลบไม่สำเร็จ
+async function sweepStops(symbol, keepId = null) {
+  if (!enabled) return { removed: 0, remaining: 0 };
+  const stops = (await getOpenStops(symbol)).filter(o => o.symbol === symbol);
+  let removed = 0;
+  for (const o of stops) {
+    if (keepId && String(o.id) === String(keepId)) continue;
+    if (await cancelStop(symbol, o)) removed++;
+  }
+  const after = (await getOpenStops(symbol)).filter(o => o.symbol === symbol);
+  if (removed) console.log(`[LIVE] ${symbol} กวาด SL ส่วนเกิน ${removed} อัน (เหลือ ${after.length})`);
+  return { removed, remaining: after.length };
 }
 const cancelOrder = (symbol, orderId) => cancelStop(symbol, orderId);
 
@@ -190,7 +213,15 @@ async function trailStopLive(side, qty, newStopPrice, symbol) {
   const old = lastStop[symbol];
   try {
     const fresh = await placeStopOrder(symbol, side, qty, newStopPrice);
-    if (old && String(old.id) !== String(fresh.orderId)) await cancelStop(symbol, old);
+    if (old && String(old.id) !== String(fresh.orderId)) {
+      const ok = await cancelStop(symbol, old);
+      if (!ok) staleStops[symbol] = true;   // จำไว้ว่ามีของค้าง
+    }
+    // ถ้าเคยลบไม่สำเร็จ → กวาดให้เหลือแค่ตัวใหม่ (เก็บกวาดของค้างจากรอบก่อนด้วย)
+    if (staleStops[symbol]) {
+      const r = await sweepStops(symbol, fresh.orderId);
+      if (r.remaining <= 1) staleStops[symbol] = false;
+    }
     return fresh;
   } catch (e) {
     console.error(`[LIVE] ${symbol} trailStop:`, e.message);
@@ -231,7 +262,9 @@ async function openLive(dir, qty, stopPrice, symbol) {
 async function closeLive(dir, qty, symbol) {
   if (!enabled) return { simulated: true };
   try {
-    if (lastStop[symbol]) { await cancelStop(symbol, lastStop[symbol]); lastStop[symbol] = null; }
+    // ลบ SL ทุกอันของเหรียญนี้ (ไม่ใช่แค่ตัวล่าสุด) — ถ้าเหลือค้างอาจ trigger เปิดไม้ใหม่!
+    await sweepStops(symbol, null);
+    lastStop[symbol] = null;
     const closeSide = dir === 'long' ? 'SELL' : 'BUY';
     const close = await placeMarketOrder(symbol, closeSide, qty, true);
     return { close, orderId: close.orderId,
@@ -274,6 +307,6 @@ module.exports = {
   isEnabled, modeLabel, stopApiMode, setLeverage,
   openLive, closeLive, trailStopLive,
   placeMarketOrder, placeStopOrder, cancelOrder, cancelStop,
-  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders,
+  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops,
   _sign: sign, _config: { LIVE_MODE, USE_TESTNET, BASE, LEVERAGE }
 };

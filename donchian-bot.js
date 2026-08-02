@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v3.1';
+const BOT_VERSION = 'v3.2';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -336,6 +336,18 @@ async function reconcile() {
       saveState();
       continue;
     }
+    // ทั้งคู่ FLAT แต่มี SL ค้าง → ลบทิ้ง (ถ้า trigger จะเปิดไม้ที่ไม่มีใครสั่ง!)
+    else if (!botPos && !exPos && live.getOpenStops && live.sweepStops) {
+      try {
+        const stray = (await live.getOpenStops(symbol)).filter(o => o.symbol === symbol);
+        if (stray.length) {
+          const r = await live.sweepStops(symbol, null);
+          await logError('warn', 'STRAY_STOP_CLEANED', symbol,
+            `FLAT แล้วแต่มี SL ค้าง ${stray.length} อัน — ลบทิ้ง ${r.removed} อัน (ถ้า trigger จะเปิดไม้ที่ไม่ได้สั่ง)`);
+          await tg(`🧹 <b>${cfg.label}: ลบ SL ตกค้าง</b>\nไม่มี position แล้วแต่มี SL ค้าง ${stray.length} อัน — ลบทิ้งแล้ว`);
+        }
+      } catch (e) { await logError('warn', 'STRAY_CHECK_FAIL', symbol, e.message); }
+    }
     // exchange มี แต่ bot ไม่มี = position ตกค้าง ไม่มีใครดูแล 🔴
     else if (!botPos && exPos) {
       health.desyncAlerts++;
@@ -369,6 +381,14 @@ async function reconcile() {
             }
           } else {
             botPos.slPlaced = true;
+            // มี SL เกิน 1 อัน (trail ลบเก่าไม่สำเร็จ) → กวาดให้เหลือตัวใหม่สุด
+            if (stops.length > 1 && live.sweepStops) {
+              stops.sort((a, b) => (b.updateTime || 0) - (a.updateTime || 0));
+              const r = await live.sweepStops(symbol, stops[0].id);
+              await logError('warn', 'DUP_STOP_SWEPT', symbol,
+                `พบ SL ซ้ำ ${stops.length} อัน — ลบส่วนเกิน ${r.removed} อัน (เหลือ ${r.remaining})`);
+              botPos.stopOrderId = stops[0].id;
+            }
             // ราคา SL บน exchange ต่างจากที่ bot คิดมาก → sync ใหม่
             const diff = Math.abs(stops[0].stopPrice - botPos.sl);
             if (diff > botPos.atr * 0.5) {
