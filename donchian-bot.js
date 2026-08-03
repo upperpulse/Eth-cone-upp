@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v3.3';
+const BOT_VERSION = 'v3.7';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -24,6 +24,11 @@ const EQUITY_LOG  = DIR + '/donchian_equity.csv';
 const TRADE_CSV   = DIR + '/donchian_trades.csv';
 const ML_LOG      = DIR + '/turtle_ml.jsonl';
 const ERROR_LOG   = DIR + '/bot_errors.jsonl';
+let aiReport;
+try { aiReport = require('./ai-report.js'); }
+catch (e) { aiReport = { isEnabled: () => false, buildDailyReport: async () => null }; }
+
+const CSV_HEADER  = 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,fee_live,fee_estimate,pnl_live,sl_placed,efficiency_ratio,peak_bar,trough_bar\n';
 
 // ══════════════════════════════════════════════════════════
 //  MARKETS — parameter แยกต่อเหรียญ (เพิ่ม/ลบเหรียญได้ที่นี่)
@@ -60,6 +65,9 @@ const ACCOUNT_SIZE     = 1000;
 const RISK_PER_TRADE   = 0.009;  // 0.90% ของ equity รวม ต่อ trade
 const LEVERAGE         = 3;
 const MAX_DRAWDOWN_PCT = 0.30;
+const MAX_OPEN_POSITIONS = 2;    // เปิดพร้อมกันได้กี่ไม้ (= จำนวนตลาด)
+const MIN_NOTIONAL     = 5;      // มูลค่าขั้นต่ำที่ Binance รับ (USDT)
+const REENTRY_COOLDOWN_BARS = 1; // หลังปิดไม้ ต้องรอกี่ชั่วโมงก่อนเข้าใหม่ (กัน whipsaw)
 const FEE              = 0.0004;
 const SLIP             = 0.0002;
 
@@ -71,6 +79,7 @@ let accountEquity = ACCOUNT_SIZE;
 let peakEquity = ACCOUNT_SIZE;
 let halted = false;
 let lastUpdateId = 0;
+const lastExitTs = {};   // เวลาปิดไม้ล่าสุดต่อเหรียญ (ใช้กับ cooldown)
 
 // ═══════════════ HELPERS ═══════════════
 async function fetchKlines(symbol, limit) {
@@ -297,13 +306,48 @@ async function maybePositionReport(symbol, price) {
 //  ตรวจสอบว่า bot ตรงกับ Binance มั้ย (จับ position ผี/ตกค้าง)
 //  เรียกทุก 15 นาที — เจอไม่ตรงเมื่อไหร่แจ้งทันที
 // ══════════════════════════════════════════════════════════
+let reconcileBackoffUntil = 0;
 async function reconcile() {
   if (!live.isEnabled() || !live.getPositionLive) return;
+  // โดน rate limit → พักยาว (เรียกถี่ยิ่งโดนหนัก)
+  if (Date.now() < reconcileBackoffUntil) return;
+
+  // ── ตรวจ equity บอท vs balance จริง (ตัวเลขเพี้ยน = risk sizing ผิดทุกไม้) ──
+  if (live.testConnection) {
+    try {
+      const conn = await live.testConnection();
+      if (conn.ok && conn.balance > 0) {
+        const flat = SYMBOLS.every(s2 => !positions[s2]);
+        const drift = conn.balance - accountEquity;
+        const driftPct = Math.abs(drift) / conn.balance * 100;
+        if (driftPct > 0.5) {
+          await logError(driftPct > 3 ? 'critical' : 'warn', 'EQUITY_DRIFT', null,
+            `equity บอท $${f(accountEquity)} ≠ Binance $${f(conn.balance)} (ต่าง $${f(drift)} = ${driftPct.toFixed(2)}%)`,
+            { bot: +accountEquity.toFixed(2), exchange: conn.balance, drift: +drift.toFixed(2) });
+          // FLAT อยู่ = ปลอดภัยที่จะ sync ให้ตรง (ไม่มี position ค้างให้คำนวณผิด)
+          if (flat) {
+            const old = accountEquity;
+            accountEquity = conn.balance;
+            if (accountEquity > peakEquity) peakEquity = accountEquity;
+            saveState();
+            await tg(`🔄 <b>ปรับ equity ให้ตรง Binance</b>\n$${f(old)} → $${f(conn.balance)}\n(ต่าง $${f(drift)} จาก fee/slippage สะสม)`);
+          }
+        }
+        health.lastBalance = conn.balance;
+        health.lastAvailable = conn.available;
+      }
+    } catch (e) { await logError('warn', 'BALANCE_CHECK_FAIL', null, e.message); }
+  }
   for (const symbol of SYMBOLS) {
     let exPos;
     try { exPos = await live.getPositionLive(symbol); }
     catch (e) {
       // เรียกไม่สำเร็จ ≠ ไม่มี position — ข้ามรอบนี้ ห้ามสรุปว่า desync
+      if (/-1003|too many request|banned/i.test(e.message)) {
+        reconcileBackoffUntil = Date.now() + 30 * 60 * 1000;   // พัก 30 นาที
+        await logError('warn', 'RATE_LIMITED', symbol, `โดน rate limit — พัก reconcile 30 นาที`);
+        return;
+      }
       await logError('warn', 'RECONCILE_FAIL', symbol, `เช็ค position ไม่ได้ (ข้ามรอบนี้): ${e.message}`);
       continue;
     }
@@ -333,6 +377,7 @@ async function reconcile() {
         `Binance ไม่มี position แล้ว (ยืนยัน 2 ครั้ง) — น่าจะโดน SL ปิด บันทึกเป็น trade ที่ราคา $${f(closePx)}`,
         { botDir: botPos.dir, botQty: botPos.qty, botEntry: botPos.entry, botSL: botPos.sl });
       await closePosition(symbol, closePx, 'SL_FILLED_EXCHANGE');
+      positions[symbol] = null;   // ยืนยันล้างแน่นอน (exchange ปิดไปแล้ว)
       saveState();
       continue;
     }
@@ -413,7 +458,10 @@ async function reconcile() {
 }
 
 async function checkAllMarkets() {
-  if (halted) return;
+  // halted = ห้ามเปิดไม้ใหม่ (เช็คใน checkSignal)
+  // แต่ position ที่ถืออยู่ต้องดูแลต่อ — trail/SL/ปิด ไม่งั้นขาดทุนไม่จำกัด
+  const hasOpen = SYMBOLS.some(s2 => positions[s2]);
+  if (halted && !hasOpen) return;
   logEquitySnapshot();
   for (const symbol of SYMBOLS) {
     try { await checkSignal(symbol); }
@@ -455,9 +503,33 @@ async function checkSignal(symbol) {
   health.lastApiOk = Date.now();
 
   const cls = kl.map(k => +k[4]);
+  // ── ตรวจคุณภาพข้อมูลก่อนใช้ — ราคาเสีย 1 แท่งทำให้ Donchian/ATR เพี้ยนทั้งชุด ──
+  const badBars = cls.filter(c => !isFinite(c) || c <= 0).length;
+  if (badBars > 0) {
+    await logError('warn', 'BAD_PRICE_DATA', symbol,
+      `พบราคาที่ใช้ไม่ได้ ${badBars}/${cls.length} แท่ง — ข้ามรอบนี้ (กันคำนวณ SL/ATR เพี้ยน)`);
+    return;
+  }
   const price = cls[cls.length - 1];
+  if (!isFinite(price) || price <= 0) {
+    await logError('warn', 'BAD_PRICE', symbol, `ราคาปัจจุบันใช้ไม่ได้: ${price}`);
+    return;
+  }
   const atr = calcATR(kl, cfg.atrPeriod);
-  if (atr <= 0) return;
+  if (!isFinite(atr) || atr <= 0) return;
+  // ATR ต่ำผิดปกติ = ตลาดนิ่งสนิท/ข้อมูลเพี้ยน
+  // SL จะชิด entry มาก → qty มหาศาล + โดนเขี่ยทันที
+  if (atr / price < 0.0005 && !positions[symbol]) {
+    await logError('warn', 'ATR_TOO_LOW', symbol,
+      `ATR ${(atr/price*100).toFixed(4)}% ของราคา — ต่ำกว่าขั้นต่ำ 0.05% ข้ามไม้นี้ (SL จะชิดเกินไป)`);
+    return;
+  }
+  // ATR ใหญ่ผิดปกติ (> 20% ของราคา) = ข้อมูลเพี้ยน ไม่ใช่ตลาดผันผวน
+  if (atr / price > 0.20) {
+    await logError('warn', 'ATR_ABNORMAL', symbol,
+      `ATR $${f(atr)} = ${(atr/price*100).toFixed(1)}% ของราคา — ผิดปกติ ข้ามรอบนี้`);
+    return;
+  }
 
   // Donchian channels (ไม่รวมแท่งปัจจุบัน)
   const recent = cls.slice(-cfg.entryPeriod - 1, -1);
@@ -546,6 +618,18 @@ async function checkSignal(symbol) {
 
   logSignal(symbol, price, entryHigh, entryLow, atr, distToHigh, distToLow);
 
+  // กันเข้าไม้ใหม่ทันทีหลังเพิ่งปิด (whipsaw ในแท่งเดียวกัน)
+  const lastExit = lastExitTs[symbol] || 0;
+  if (lastExit && (Date.now() - lastExit) < REENTRY_COOLDOWN_BARS * 3600000) {
+    if (price > entryHigh || price < entryLow) {
+      const waitMin = Math.ceil((REENTRY_COOLDOWN_BARS * 3600000 - (Date.now() - lastExit)) / 60000);
+      console.log(`[${ts}] ${L} มี signal แต่รอ cooldown อีก ${waitMin} นาที`);
+    }
+    return;
+  }
+
+  if (halted) return;   // หยุดเทรดแล้ว — ไม่เปิดไม้ใหม่ (แต่ position เดิมยังดูแลอยู่ด้านบน)
+
   if (price > entryHigh) {
     await openPosition(symbol, 'long', price, atr, kl, entryHigh, entryLow);
   } else if (price < entryLow) {
@@ -556,6 +640,25 @@ async function checkSignal(symbol) {
 async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
   const cfg = MARKETS[symbol];
   const sl = dir === 'long' ? entry - atr * cfg.trailATR : entry + atr * cfg.trailATR;
+  // ── ตรวจ SL สมเหตุผลก่อนใช้ (ข้อมูลเพี้ยนทำให้ SL ติดลบได้) ──
+  if (!isFinite(sl) || sl <= 0) {
+    await logError('critical', 'INVALID_SL', symbol,
+      `คำนวณ SL ได้ค่าใช้ไม่ได้ ($${sl}) — ยกเลิกไม้นี้`, { entry, atr, trailATR: cfg.trailATR });
+    return;
+  }
+  const slDistPct = Math.abs(entry - sl) / entry;
+  if (slDistPct > 0.50) {
+    await logError('warn', 'SL_TOO_FAR', symbol,
+      `ระยะ SL ${(slDistPct * 100).toFixed(1)}% ของราคา — กว้างผิดปกติ ข้ามไม้นี้`, { entry, sl, atr });
+    return;
+  }
+  // ── กันเปิดไม้เกินตัว: จำกัดจำนวน position พร้อมกัน ──
+  const nOpen = SYMBOLS.filter(s2 => positions[s2]).length;
+  if (nOpen >= MAX_OPEN_POSITIONS) {
+    console.log(`[${cfg.label}] ข้าม — เปิดครบ ${MAX_OPEN_POSITIONS} ไม้แล้ว`);
+    return;
+  }
+
   let qty = calcPositionSize(entry, sl);
   // ── ปัด qty ให้ตรงกับที่ exchange รับ (ปัดลง = risk ไม่เกินที่ตั้งไว้) ──
   // ถ้าไม่ปัด: bot คิด 16.8975 SOL แต่ Binance ได้ 17 → PnL/risk/equity เพี้ยนสะสม
@@ -565,6 +668,30 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
   if (qty <= 0) {
     console.log(`[${cfg.label}] ข้าม — qty หลังปัดเศษ = 0 (equity น้อยเกินสำหรับเหรียญนี้)`);
     return;
+  }
+
+  // ── Binance ปฏิเสธ order ที่มูลค่าต่ำกว่า minNotional (ปกติ $5) ──
+  const notionalCheck = qty * entry;
+  if (notionalCheck < MIN_NOTIONAL) {
+    await logError('warn', 'BELOW_MIN_NOTIONAL', symbol,
+      `มูลค่าไม้ $${f(notionalCheck)} ต่ำกว่าขั้นต่ำ $${MIN_NOTIONAL} — ข้ามไม้นี้`, { qty, entry });
+    return;
+  }
+
+  // ── เช็คว่ามี margin พอจริงบน exchange (กัน error -2019 Margin insufficient) ──
+  if (live.isEnabled() && live.testConnection) {
+    try {
+      const conn = await live.testConnection();
+      if (conn.ok) {
+        const marginNeeded = notionalCheck / LEVERAGE;
+        if (conn.available < marginNeeded * 1.1) {   // เผื่อ 10% สำหรับ fee
+          await logError('critical', 'INSUFFICIENT_MARGIN', symbol,
+            `margin ไม่พอ — ต้องใช้ $${f(marginNeeded)} มีจริง $${f(conn.available)} — ข้ามไม้นี้`,
+            { needed: +marginNeeded.toFixed(2), available: conn.available });
+          return;
+        }
+      }
+    } catch (e) { await logError('warn', 'MARGIN_CHECK_FAIL', symbol, e.message); }
   }
 
   // ML features ตอน entry
@@ -614,6 +741,19 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
       const fp = r.fillPrice;
       positions[symbol].liveEntryFill = fp;
       positions[symbol].entryFeeLive = r.fee ?? null;
+      // ── partial fill: ได้ qty ไม่เท่าที่สั่ง → ต้องใช้ของจริง ──
+      // ไม่งั้น SL วางผิดจำนวน + PnL/risk คำนวณผิด
+      if (r.fillQty && Math.abs(r.fillQty - qty) / qty > 0.001) {
+        const oldQty = qty;
+        positions[symbol].qty = r.fillQty;
+        positions[symbol].liveFillQty = r.fillQty;
+        positions[symbol].riskAmt = Math.abs(entry - sl) * r.fillQty;
+        await logError('warn', 'PARTIAL_FILL', symbol,
+          `สั่ง ${oldQty} ได้จริง ${r.fillQty} — ปรับ qty/risk ตามของจริงแล้ว`,
+          { ordered: oldQty, filled: r.fillQty });
+      } else if (r.fillQty) {
+        positions[symbol].liveFillQty = r.fillQty;
+      }
       positions[symbol].entryOrderId = r.orderId || null;
       positions[symbol].stopOrderId = r.stopOrderId || null;
       positions[symbol].slPlaced = !!r.stopPlaced;
@@ -649,31 +789,34 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
 async function closePosition(symbol, exit, reason) {
   const position = positions[symbol];
   if (!position) return;
+  // กันปิดซ้ำ: ถ้ากำลังปิดอยู่แล้วให้ข้าม (reconcile + loop หลักอาจเรียกพร้อมกัน)
+  if (position._closing) {
+    console.log(`[${symbol}] ข้าม — กำลังปิดอยู่แล้ว`);
+    return;
+  }
+  position._closing = true;
   const cfg = MARKETS[symbol];
   const { dir, entry, qty, peak, trough, entryTs, riskAmt, atr } = position;
-  const bars = Math.round((Date.now() - entryTs) / 3600000);
-  const gross = dir === 'long' ? (exit - entry) * qty : (entry - exit) * qty;
-  const fee = (entry + exit) * qty * (FEE + SLIP);
-  const fundingCost = (qty * entry) * 0.0001 * (bars / 8);
-  const pnl = gross - fee - fundingCost;
-
-  const mfe = dir === 'long' ? (peak - entry) * qty : (entry - peak) * qty;
-  const mae = dir === 'long' ? (trough - entry) * qty : (entry - trough) * qty;
-  const rMultiple = riskAmt > 0 ? pnl / riskAmt : 0;
-  const holdH = bars;
-
-  // TP+2R shadow (paper validate — ไม่เปลี่ยน exit จริง)
-  const mfeR = riskAmt > 0 ? mfe / riskAmt : 0;
-  const tp2Hit = mfeR >= 2;
-  const tp2Pnl = tp2Hit ? riskAmt * 2 : pnl;
-  const tp2Diff = +(tp2Pnl - pnl).toFixed(2);
-
   let exitFill = null, slipExit = null, liveFeeExit = null, liveRealizedPnl = null;
   // ถ้า exchange ปิด position ไปแล้ว (SL trigger) ห้ามส่ง market order ซ้ำ
   // ไม่งั้นจะกลายเป็นเปิดไม้ใหม่ทางตรงข้าม!
   const alreadyClosedOnExchange = (reason === 'SL_FILLED_EXCHANGE');
-  if (alreadyClosedOnExchange && live.cancelStop) {
-    try { await live.cancelStop(symbol, position.stopOrderId); } catch (e) {}
+  if (alreadyClosedOnExchange) {
+    if (live.cancelStop) { try { await live.cancelStop(symbol, position.stopOrderId); } catch (e) {} }
+    // SL trigger เอง → ดึงราคาปิดจริงจากประวัติ (ไม่งั้นใช้ราคาประมาณ = PnL เพี้ยน)
+    if (live.getExitFillFromHistory) {
+      try {
+        const f = await live.getExitFillFromHistory(symbol, dir, entryTs);
+        if (f) {
+          exitFill = f.price;
+          liveFeeExit = f.fee;
+          liveRealizedPnl = f.realizedPnl;
+          const sa = dir === 'long' ? exit - f.price : f.price - exit;
+          slipExit = +((sa / exit) * 10000).toFixed(2);
+          console.log(`[${symbol}] ดึงราคาปิดจริงจาก SL: $${f.price} (PnL จริง $${f.realizedPnl})`);
+        }
+      } catch (e) {}
+    }
   }
   if (live.isEnabled() && !alreadyClosedOnExchange) {
     let closed = false, closeErr = null;
@@ -713,14 +856,47 @@ async function closePosition(symbol, exit, reason) {
         `⚠️ <b>position ยังเปิดอยู่บน Binance</b>\n` +
         `บอทเก็บไว้ในระบบและจะลองปิดใหม่รอบหน้า\n` +
         `ถ้าเร่งด่วน → ปิดเองใน Binance แล้วสั่ง /close_${cfg.label.toLowerCase()}`);
+      position._closing = false;   // ปลดล็อกให้ลองใหม่รอบหน้า
       saveState();
       return;   // ไม่บันทึก trade ปลอม ไม่แตะ equity
     }
   }
 
-  // ── ปิดสำเร็จแล้ว (หรือโหมด paper) → ค่อยอัพเดต equity ──
+  const bars = Math.max(0, Math.round((Date.now() - entryTs) / 3600000));   // กัน entryTs เพี้ยน
+  // ── ใช้ราคา fill จริงถ้ามี (ไม่งั้น equity เพี้ยนจากบัญชีจริงสะสมทุกไม้) ──
+  const realEntry = position.liveEntryFill || entry;
+  const realExit  = exitFill || exit;
+  const realQty   = position.liveFillQty || qty;
+  const gross = dir === 'long' ? (realExit - realEntry) * realQty : (realEntry - realExit) * realQty;
+  // fee: ใช้ค่าจริงจาก Binance ถ้ามี ไม่งั้นประมาณ
+  const feeReal = (position.entryFeeLive != null || liveFeeExit != null)
+    ? ((position.entryFeeLive || 0) + (liveFeeExit || 0)) : null;
+  const feeEst = (realEntry + realExit) * realQty * FEE;   // SLIP ไม่ต้องบวกแล้ว (อยู่ในราคา fill จริง)
+  const fee = feeReal != null ? feeReal : (realEntry + realExit) * realQty * (FEE + SLIP);
+  const fundingCost = (realQty * realEntry) * 0.0001 * (bars / 8);
+  const pnl = gross - fee - fundingCost;
+
+  // ── ปิดสำเร็จแล้ว (หรือโหมด paper) → อัพเดต equity ──
   accountEquity += pnl;
   if (accountEquity > peakEquity) peakEquity = accountEquity;
+
+  const mfe = dir === 'long' ? (peak - entry) * qty : (entry - peak) * qty;
+  const mae = dir === 'long' ? (trough - entry) * qty : (entry - trough) * qty;
+  const rMultiple = riskAmt > 0 ? pnl / riskAmt : 0;
+  // แจ้งเตือนถ้าขาดทุนเกินที่ควรมาก (gap/flash crash ข้าม SL)
+  if (rMultiple < -1.5) {
+    await logError('critical', 'EXCESSIVE_LOSS', symbol,
+      `ขาดทุน ${rMultiple.toFixed(2)}R (ควรไม่เกิน -1R) — ราคากระโดดข้าม SL`,
+      { entry: realEntry, exit: realExit, sl: position.sl, pnl: +pnl.toFixed(2),
+        pctOfEquity: +(Math.abs(pnl) / accountEquity * 100).toFixed(2) });
+  }
+  const holdH = bars;
+
+  // TP+2R shadow (paper validate — ไม่เปลี่ยน exit จริง)
+  const mfeR = riskAmt > 0 ? mfe / riskAmt : 0;
+  const tp2Hit = mfeR >= 2;
+  const tp2Pnl = tp2Hit ? riskAmt * 2 : pnl;
+  const tp2Diff = +(tp2Pnl - pnl).toFixed(2);
 
   const trade = {
     num: trades.length + 1, symbol, label: cfg.label,
@@ -768,6 +944,7 @@ async function closePosition(symbol, exit, reason) {
   console.log(`<<< ${cfg.label} EXIT ${reason} pnl $${f(pnl)} (${rMultiple.toFixed(2)}R) equity $${f(accountEquity)}`);
 
   positions[symbol] = null;
+  lastExitTs[symbol] = Date.now();
 
   // Max Drawdown Stop (คิดจาก equity รวมทั้งพอร์ต)
   const dd = (peakEquity - accountEquity) / peakEquity;
@@ -818,7 +995,7 @@ function logML(features, trade) {
 function logTradeCSV(t) {
   try {
     if (!fs.existsSync(TRADE_CSV)) {
-      fs.writeFileSync(TRADE_CSV, 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,fee_live,fee_estimate,pnl_live,sl_placed,efficiency_ratio,peak_bar,trough_bar\n');
+      fs.writeFileSync(TRADE_CSV, CSV_HEADER);
     }
     const et = new Date(t.entryTs).toISOString();
     const xt = new Date(t.exitTs).toISOString();
@@ -840,6 +1017,49 @@ function logEquitySnapshot() {
     const dd = ((peakEquity - accountEquity) / peakEquity * 100).toFixed(2);
     fs.appendFileSync(EQUITY_LOG, `${day},${accountEquity.toFixed(2)},${peakEquity.toFixed(2)},${dd},${trades.length}\n`);
   } catch (e) {}
+}
+
+// ── รายงานวิเคราะห์ด้วย AI (ถ้าตั้ง ANTHROPIC_API_KEY) ──
+async function sendAiReport(manual = false) {
+  if (!aiReport.isEnabled()) {
+    if (manual) await tg('⚠️ ยังไม่ได้ตั้ง ANTHROPIC_API_KEY ใน .env — รายงาน AI ปิดอยู่');
+    return;
+  }
+  try {
+    let exBal = null;
+    if (live.isEnabled() && live.testConnection) {
+      try { const c = await live.testConnection(); if (c.ok) exBal = c.balance; } catch (e) {}
+    }
+    const text = await aiReport.buildDailyReport({
+      dir: DIR,
+      equity: +accountEquity.toFixed(2),
+      startEquity: ACCOUNT_SIZE,
+      peakEquity: +peakEquity.toFixed(2),
+      halted, positions,
+      exchangeBalance: exBal,
+      config: {
+        markets: SYMBOLS.map(s2 => ({ symbol: s2, ...MARKETS[s2] })),
+        risk_per_trade_pct: RISK_PER_TRADE * 100,
+        leverage: LEVERAGE,
+        max_drawdown_halt_pct: MAX_DRAWDOWN_PCT * 100,
+        mode: live.modeLabel()
+      },
+      healthCounters: {
+        api_fail_streak: health.apiFailStreak,
+        order_errors: health.orderErrors,
+        close_errors: health.closeErrors,
+        sl_errors: health.slErrors,
+        desync_alerts: health.desyncAlerts
+      }
+    });
+    if (text) {
+      await tg(`🤖 <b>รายงานวิเคราะห์ประจำวัน</b>\n\n${text}`);
+      console.log('[AI] ส่งรายงานแล้ว');
+    }
+  } catch (e) {
+    await logError('warn', 'AI_REPORT_FAILED', null, `สร้างรายงาน AI ไม่สำเร็จ: ${e.message}`);
+    if (manual) await tg(`⚠️ สร้างรายงานไม่สำเร็จ: ${e.message}`);
+  }
 }
 
 async function sendDailySummary() {
@@ -934,6 +1154,9 @@ async function pollTelegram() {
           `ข้อมูลไม่ตรงกัน: ${health.desyncAlerts}\n\n` +
           `error 24 ชม.: ${last24.length} (ร้ายแรง ${crit.length})\n` +
           (health.lastError ? `\nล่าสุด: ${health.lastError.kind}\n${health.lastError.tsLocal}\n${health.lastError.message.slice(0,120)}` : '\nยังไม่มี error ✅'));
+      } else if (text === '/report' || text === '/รายงาน') {
+        await tg('🤖 กำลังวิเคราะห์ข้อมูล...');
+        await sendAiReport(true);
       } else if (text === '/errors' || text === '/err') {
         let lines = [];
         try { lines = fs.readFileSync(ERROR_LOG,'utf8').trim().split('\n').filter(Boolean).slice(-10); } catch {}
@@ -1307,7 +1530,7 @@ tg(`🐢 <b>Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\n` +
 
 // ตรวจความตรงกันกับ Binance ทุก 15 นาที
 if (live.isEnabled()) {
-  setTimeout(() => { reconcile(); setInterval(reconcile, 5 * 60 * 1000); }, 30000);   // เช็คทุก 5 นาที (SL หาย = เรื่องใหญ่ ต้องเจอเร็ว)
+  setTimeout(() => { reconcile(); setInterval(reconcile, 10 * 60 * 1000); }, 30000);   // ทุก 10 นาที (ถี่กว่านี้โดน rate limit -1003)
 }
 
 // loop ทุก 1 นาที — เช็คทุกตลาด
@@ -1325,5 +1548,6 @@ setInterval(async () => {
   if (utcH === 13 && day !== lastSummaryDay) {
     lastSummaryDay = day;
     await sendDailySummary();
+    await sendAiReport();      // รายงาน AI ตามหลัง (20:00 ไทย)
   }
 }, 5 * 60 * 1000);

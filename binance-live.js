@@ -93,6 +93,37 @@ async function getFillPrice(symbol, orderId, retries = 3) {
   return null;
 }
 
+// ── ดึงราคาปิดจริงเมื่อ SL trigger บน exchange (บอทไม่ได้ส่ง order เอง) ──
+// จับ trade ที่เกิดหลัง entryTs และเป็นฝั่งตรงข้ามกับ position
+async function getExitFillFromHistory(symbol, dir, sinceTs) {
+  if (!enabled) return null;
+  try {
+    const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 50 });
+    if (!Array.isArray(trades)) return null;
+    const closeSide = dir === 'long' ? 'SELL' : 'BUY';
+    const mine = trades.filter(t =>
+      t.time >= sinceTs &&
+      (t.side === closeSide || (t.buyer === (closeSide === 'BUY'))) &&
+      parseFloat(t.realizedPnl || 0) !== 0     // ไม้ปิดเท่านั้น (มี realizedPnl)
+    );
+    if (!mine.length) return null;
+    // เอากลุ่มล่าสุด (orderId เดียวกัน)
+    const lastOrderId = mine[mine.length - 1].orderId;
+    const group = mine.filter(t => String(t.orderId) === String(lastOrderId));
+    let qty = 0, notional = 0, fee = 0, pnl = 0;
+    for (const t of group) {
+      const q = parseFloat(t.qty), p = parseFloat(t.price);
+      qty += q; notional += q * p;
+      fee += parseFloat(t.commission || 0);
+      pnl += parseFloat(t.realizedPnl || 0);
+    }
+    if (qty <= 0) return null;
+    return { price: +(notional / qty).toFixed(6), qty: +qty.toFixed(8),
+             fee: +fee.toFixed(6), realizedPnl: +pnl.toFixed(6), fills: group.length,
+             orderId: lastOrderId };
+  } catch (e) { return null; }
+}
+
 // ══════════ STOP ORDER — ตรวจเองว่าใช้ API แบบไหน ══════════
 async function placeStopStandard(symbol, side, qty, stopPrice) {
   const data = await raw('POST', '/fapi/v1/order', {
@@ -184,31 +215,37 @@ async function sweepStops(symbol, keepId = null) {
 const cancelOrder = (symbol, orderId) => cancelStop(symbol, orderId);
 
 // ── ดู stop order ที่เปิดอยู่ (รวมทั้ง 2 แบบ) ──
+// throw เมื่อเช็คไม่ได้ — ห้ามคืน [] แล้วให้เข้าใจผิดว่า "ไม่มี SL"
 async function getOpenStops(symbol) {
   if (!enabled) return [];
   const out = [];
+  let algoOk = false, stdOk = false, lastErr = null;
   try {
     const algo = await raw('GET', '/fapi/v1/openAlgoOrders', symbol ? { symbol } : {});
     if (Array.isArray(algo)) {
+      algoOk = true;
       algo.filter(o => o.orderType === 'STOP_MARKET' || o.algoType === 'CONDITIONAL')
           .forEach(o => out.push({
             id: o.algoId, isAlgo: true, symbol: o.symbol, side: o.side,
             stopPrice: parseFloat(o.triggerPrice || o.stopPrice || 0),
             qty: parseFloat(o.quantity), updateTime: o.bookTime || o.updateTime || 0
           }));
-    }
-  } catch (e) {}
+    } else { lastErr = `openAlgoOrders: ${JSON.stringify(algo).slice(0, 100)}`; }
+  } catch (e) { lastErr = `openAlgoOrders: ${e.message}`; }
   try {
     const std = await raw('GET', '/fapi/v1/openOrders', symbol ? { symbol } : {});
     if (Array.isArray(std)) {
+      stdOk = true;
       std.filter(o => o.type === 'STOP_MARKET' || o.type === 'STOP')
          .forEach(o => out.push({
            id: o.orderId, isAlgo: false, symbol: o.symbol, side: o.side,
            stopPrice: parseFloat(o.stopPrice), qty: parseFloat(o.origQty),
            updateTime: o.updateTime || 0
          }));
-    }
-  } catch (e) {}
+    } else { lastErr = lastErr || `openOrders: ${JSON.stringify(std).slice(0, 100)}`; }
+  } catch (e) { lastErr = lastErr || `openOrders: ${e.message}`; }
+  // ทั้งสอง endpoint ล้มเหลว = เช็คไม่ได้จริง ห้ามสรุปว่าไม่มี SL
+  if (!algoOk && !stdOk) throw new Error(`เช็ค stop order ไม่ได้ — ${lastErr || 'ไม่ทราบสาเหตุ'}`);
   return out;
 }
 const getOpenOrders = getOpenStops;
@@ -266,10 +303,13 @@ async function openLive(dir, qty, stopPrice, symbol) {
     out.fillPrice = parseFloat(entry.avgPrice) || null;
     out.fillQty = parseFloat(entry.executedQty) || null;
     out.status = entry.status;
-    // MARKET order มักคืน avgPrice='0' → ดึงราคาจริงจาก userTrades
-    if (!out.fillPrice) {
-      const f = await getFillPrice(symbol, entry.orderId);
-      if (f) { out.fillPrice = f.price; out.fillQty = f.qty; out.fee = f.fee; out.fills = f.fills; }
+    // ดึงจาก userTrades เสมอ — ได้ทั้งราคา fill จริงและ fee (avgPrice มักเป็น '0')
+    const f = await getFillPrice(symbol, entry.orderId);
+    if (f) {
+      out.fillPrice = out.fillPrice || f.price;
+      out.fillQty = f.qty;
+      out.fee = f.fee;
+      out.fills = f.fills;
     }
   } catch (e) {
     console.error(`[LIVE] ${symbol} entry order:`, e.message);
@@ -300,9 +340,10 @@ async function closeLive(dir, qty, symbol) {
     let fillPrice = parseFloat(close.avgPrice) || null;
     let fillQty = parseFloat(close.executedQty) || null;
     let fee = null, realizedPnl = null, fills = null;
-    if (!fillPrice) {
-      const f = await getFillPrice(symbol, close.orderId);
-      if (f) { fillPrice = f.price; fillQty = f.qty; fee = f.fee; realizedPnl = f.realizedPnl; fills = f.fills; }
+    const f = await getFillPrice(symbol, close.orderId);
+    if (f) {
+      fillPrice = fillPrice || f.price;
+      fillQty = f.qty; fee = f.fee; realizedPnl = f.realizedPnl; fills = f.fills;
     }
     return { close, orderId: close.orderId, fillPrice, fillQty, fee, realizedPnl, fills };
   } catch (e) {
@@ -342,6 +383,6 @@ module.exports = {
   isEnabled, modeLabel, stopApiMode, setLeverage,
   openLive, closeLive, trailStopLive,
   placeMarketOrder, placeStopOrder, cancelOrder, cancelStop,
-  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops, getFillPrice,
+  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops, getFillPrice, getExitFillFromHistory,
   _sign: sign, _config: { LIVE_MODE, USE_TESTNET, BASE, LEVERAGE }
 };
