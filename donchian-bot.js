@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v3.8';
+const BOT_VERSION = 'v3.9';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -28,7 +28,7 @@ let aiReport;
 try { aiReport = require('./ai-report.js'); }
 catch (e) { aiReport = { isEnabled: () => false, buildDailyReport: async () => null }; }
 
-const CSV_HEADER  = 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,fee_live,fee_estimate,pnl_live,sl_placed,efficiency_ratio,peak_bar,trough_bar\n';
+const CSV_HEADER  = 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,fee_live,fee_estimate,pnl_live,pnl_estimate,pnl_source,sl_placed,efficiency_ratio,peak_bar,trough_bar\n';
 
 // ══════════════════════════════════════════════════════════
 //  MARKETS — parameter แยกต่อเหรียญ (เพิ่ม/ลบเหรียญได้ที่นี่)
@@ -314,13 +314,24 @@ async function reconcile() {
   // โดน rate limit → พักยาว (เรียกถี่ยิ่งโดนหนัก)
   if (Date.now() < reconcileBackoffUntil) return;
 
+
   // ── ตรวจ equity บอท vs balance จริง (ตัวเลขเพี้ยน = risk sizing ผิดทุกไม้) ──
   if (live.testConnection) {
     try {
       const conn = await live.testConnection();
       if (conn.ok && conn.balance > 0) {
         const flat = SYMBOLS.every(s2 => !positions[s2]);
-        const drift = conn.balance - accountEquity;
+        // ตอนถือ position: balance บน exchange รวมกำไรลอยแล้ว ต้องหักออกก่อนเทียบ
+        let floatPnl = 0;
+        for (const s2 of SYMBOLS) {
+          const p2 = positions[s2];
+          if (!p2) continue;
+          const px = dashCache[s2]?.price;
+          if (!px) { floatPnl = null; break; }
+          floatPnl += p2.dir === 'long' ? (px - p2.entry) * p2.qty : (p2.entry - px) * p2.qty;
+        }
+        if (floatPnl === null) return;   // ไม่รู้ราคาปัจจุบัน → ข้ามการเทียบรอบนี้
+        const drift = conn.balance - floatPnl - accountEquity;
         const driftPct = Math.abs(drift) / conn.balance * 100;
         if (driftPct > 0.5) {
           await logError(driftPct > 3 ? 'critical' : 'warn', 'EQUITY_DRIFT', null,
@@ -876,7 +887,17 @@ async function closePosition(symbol, exit, reason) {
   const feeEst = (realEntry + realExit) * realQty * FEE;   // SLIP ไม่ต้องบวกแล้ว (อยู่ในราคา fill จริง)
   const fee = feeReal != null ? feeReal : (realEntry + realExit) * realQty * (FEE + SLIP);
   const fundingCost = (realQty * realEntry) * 0.0001 * (bars / 8);
-  const pnl = gross - fee - fundingCost;
+  const pnlEstimate = gross - fee - fundingCost;
+  // ── ยึด realizedPnl จาก exchange เป็นหลัก (รวม fee + funding จริงหมดแล้ว) ──
+  // ถ้าไม่มี (paper / ดึงไม่ได้) ค่อยใช้ค่าประมาณ
+  const usingLivePnl = live.isEnabled() && liveRealizedPnl != null;
+  const pnl = usingLivePnl ? (liveRealizedPnl - (position.entryFeeLive || 0)) : pnlEstimate;
+  if (usingLivePnl && Math.abs(pnl - pnlEstimate) > Math.max(1, Math.abs(pnlEstimate) * 0.15)) {
+    await logError('warn', 'PNL_MISMATCH', symbol,
+      `PnL จริงจาก Binance $${pnl.toFixed(2)} ต่างจากที่คำนวณเอง $${pnlEstimate.toFixed(2)} — ใช้ค่าจริง`,
+      { live: +pnl.toFixed(4), estimate: +pnlEstimate.toFixed(4),
+        diff: +(pnl - pnlEstimate).toFixed(4), fundingEstimate: +fundingCost.toFixed(4) });
+  }
 
   // ── ปิดสำเร็จแล้ว (หรือโหมด paper) → อัพเดต equity ──
   accountEquity += pnl;
@@ -920,6 +941,8 @@ async function closePosition(symbol, exit, reason) {
       ? +(((position.entryFeeLive || 0) + (liveFeeExit || 0))).toFixed(6) : null,
     feeEstimate: +fee.toFixed(4),
     pnlLive: liveRealizedPnl,
+    pnlEstimate: +pnlEstimate.toFixed(2),
+    pnlSource: usingLivePnl ? 'exchange' : 'estimate',
     slPlaced: position.slPlaced ?? null,
     entryOrderId: position.entryOrderId ?? null,
     // ── บริบทตลาด + จังหวะ ──
@@ -1002,7 +1025,7 @@ function logTradeCSV(t) {
     const et = new Date(t.entryTs).toISOString();
     const xt = new Date(t.exitTs).toISOString();
     const nz = v => (v === null || v === undefined) ? '' : v;
-    const row = `${t.num},${t.symbol||'ETHUSDT'},${et},${xt},${t.dir},${t.entry},${t.exit},${t.qty},${t.pnl},${t.rMultiple},${t.reason},${t.bars},${t.mfe},${t.mae},${t.riskAmt},${t.atr},${t.equity},${nz(t.mode)},${nz(t.entryFill)},${nz(t.exitFill)},${nz(t.slipEntryBps)},${nz(t.slipExitBps)},${nz(t.feeLive)},${nz(t.feeEstimate)},${nz(t.pnlLive)},${nz(t.slPlaced)},${nz(t.efficiencyRatio)},${nz(t.peakBar)},${nz(t.troughBar)}\n`;
+    const row = `${t.num},${t.symbol||'ETHUSDT'},${et},${xt},${t.dir},${t.entry},${t.exit},${t.qty},${t.pnl},${t.rMultiple},${t.reason},${t.bars},${t.mfe},${t.mae},${t.riskAmt},${t.atr},${t.equity},${nz(t.mode)},${nz(t.entryFill)},${nz(t.exitFill)},${nz(t.slipEntryBps)},${nz(t.slipExitBps)},${nz(t.feeLive)},${nz(t.feeEstimate)},${nz(t.pnlLive)},${nz(t.pnlEstimate)},${nz(t.pnlSource)},${nz(t.slPlaced)},${nz(t.efficiencyRatio)},${nz(t.peakBar)},${nz(t.troughBar)}\n`;
     fs.appendFileSync(TRADE_CSV, row);
   } catch (e) {}
 }
