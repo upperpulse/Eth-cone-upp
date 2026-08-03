@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v3.7';
+const BOT_VERSION = 'v3.8';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -76,6 +76,7 @@ let positions = {};           // { ETHUSDT: {...} | null, SOLUSDT: {...} | null 
 SYMBOLS.forEach(s => positions[s] = null);
 let trades = [];              // ทุกเหรียญรวมกัน (มี field .symbol)
 let accountEquity = ACCOUNT_SIZE;
+let startEquity = ACCOUNT_SIZE;   // ทุนเริ่มต้นจริง (sync จาก exchange) — ใช้คิด % ผลตอบแทน
 let peakEquity = ACCOUNT_SIZE;
 let halted = false;
 let lastUpdateId = 0;
@@ -199,7 +200,7 @@ async function tgDocument(filename, content, caption='') {
 
 function saveState() {
   try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ v: 2, positions, accountEquity, peakEquity, halted }));
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ v: 2, positions, accountEquity, startEquity, peakEquity, halted }));
     fs.writeFileSync(TRADES_FILE, JSON.stringify(trades));
   } catch (e) { console.error('save:', e.message); }
 }
@@ -208,6 +209,7 @@ function loadState() {
     if (fs.existsSync(STATE_FILE)) {
       const st = JSON.parse(fs.readFileSync(STATE_FILE));
       accountEquity = st.accountEquity ?? ACCOUNT_SIZE;
+      startEquity = st.startEquity ?? st.accountEquity ?? ACCOUNT_SIZE;
       peakEquity = st.peakEquity ?? ACCOUNT_SIZE;
       halted = st.halted ?? false;
       if (st.positions) {                       // v2 format
@@ -1033,7 +1035,7 @@ async function sendAiReport(manual = false) {
     const text = await aiReport.buildDailyReport({
       dir: DIR,
       equity: +accountEquity.toFixed(2),
-      startEquity: ACCOUNT_SIZE,
+      startEquity: +startEquity.toFixed(2),
       peakEquity: +peakEquity.toFixed(2),
       halted, positions,
       exchangeBalance: exBal,
@@ -1113,7 +1115,7 @@ function getStats() {
   return `รวม ${trades.length} | WR ${wr}% | PnL $${f(tot)}\n` +
     `Payoff ${payoff} | Kelly ${kelly}% | Avg ${avgR}R\n` +
     `ถือเฉลี่ย ${avgHold}h | DD ${dd}% (max ${ddMax}%)\n` +
-    `Equity $${f(accountEquity)} (เริ่ม $${ACCOUNT_SIZE}, ${((accountEquity/ACCOUNT_SIZE-1)*100).toFixed(1)}%)\n\n` +
+    `Equity $${f(accountEquity)} (เริ่ม $${f(startEquity)}, ${((accountEquity/startEquity-1)*100).toFixed(2)}%)\n\n` +
     `── รายตลาด ──\n${perMkt}`;
 }
 
@@ -1320,7 +1322,7 @@ async function pollTelegram() {
         await tg('▶️ Resume — เริ่มเทรดใหม่ (reset peak)');
         saveState();
       } else if (text === '/reset') {
-        SYMBOLS.forEach(s2 => positions[s2] = null); trades = []; accountEquity = ACCOUNT_SIZE; peakEquity = ACCOUNT_SIZE; halted = false;
+        SYMBOLS.forEach(s2 => positions[s2] = null); trades = []; accountEquity = ACCOUNT_SIZE; startEquity = ACCOUNT_SIZE; peakEquity = ACCOUNT_SIZE; halted = false;
         await tg('🔄 Reset — เริ่มใหม่ทั้งหมด');
         saveState();
       }
@@ -1403,7 +1405,7 @@ function buildDashboardData() {
     version: BOT_VERSION,
     symbols: SYMBOLS,
     equity: +accountEquity.toFixed(2),
-    start: ACCOUNT_SIZE,
+    start: +startEquity.toFixed(2),
     peakEquity: +peakEquity.toFixed(2),
     floatPnl: +totalFloat.toFixed(2),
     halted,
@@ -1476,6 +1478,7 @@ if (live.isEnabled() && live.testConnection) {
       if (accountEquity === ACCOUNT_SIZE && conn.balance > 0) {
         accountEquity = conn.balance;
         peakEquity = conn.balance;
+        startEquity = conn.balance;   // ทุนเริ่มต้นจริง
         console.log(`[LIVE] sync equity → $${conn.balance} (จาก testnet balance)`);
       }
       // ── รับช่วง SL order ที่ค้างอยู่ (สำคัญตอน restart กลางไม้) ──
