@@ -1,0 +1,2 @@
+num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,fee_live,fee_estimate,pnl_live,pnl_estimate,pnl_source,sl_placed,efficiency_ratio,peak_bar,trough_bar
+1,ETHUSDT,2026-08-03T08:21:58.260Z,2026-08-03T14:55:00.347Z,short,1830.99,1868.5,1.063,-40.04,-0.92,TRAIL_SL,7,1.5,-39.87,43.7,11.75,4815.82,LIVE-TESTNET,1830,1866.939661,5.41,-8.35,1.571939,1.5719,-39.26686,-41.01,exchange,true,,0,0
