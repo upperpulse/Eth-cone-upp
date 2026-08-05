@@ -368,6 +368,21 @@ async function getPositionLive(symbol) {
            unrealizedPnl: parseFloat(pos.unRealizedProfit) };
 }
 
+// ── ดึง funding fee จริงที่จ่าย/ได้รับ ในช่วงเวลาที่ถือ position ──
+// backtest ประมาณ 0.01%/8ชม. คงที่ — ของจริงแกว่ง -0.05% ถึง +0.1%
+async function getFundingPaid(symbol, startTime, endTime) {
+  if (!enabled) return null;
+  try {
+    const rows = await raw('GET', '/fapi/v1/income', {
+      symbol, incomeType: 'FUNDING_FEE',
+      startTime: Math.floor(startTime), endTime: Math.floor(endTime || Date.now()), limit: 100
+    });
+    if (!Array.isArray(rows)) return null;
+    const total = rows.reduce((a, r) => a + parseFloat(r.income || 0), 0);
+    return { total: +total.toFixed(6), count: rows.length };   // ติดลบ = จ่าย, บวก = ได้รับ
+  } catch (e) { return null; }
+}
+
 async function testConnection() {
   if (!enabled) return { ok: false, reason: 'disabled (ยังไม่เปิด LIVE_MODE หรือไม่มี key)' };
   try {
@@ -383,6 +398,6 @@ module.exports = {
   isEnabled, modeLabel, stopApiMode, setLeverage,
   openLive, closeLive, trailStopLive,
   placeMarketOrder, placeStopOrder, cancelOrder, cancelStop,
-  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops, getFillPrice, getExitFillFromHistory,
+  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops, getFillPrice, getExitFillFromHistory, getFundingPaid,
   _sign: sign, _config: { LIVE_MODE, USE_TESTNET, BASE, LEVERAGE }
 };

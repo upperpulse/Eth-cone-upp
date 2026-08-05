@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v3.9';
+const BOT_VERSION = 'v4.1';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -24,11 +24,15 @@ const EQUITY_LOG  = DIR + '/donchian_equity.csv';
 const TRADE_CSV   = DIR + '/donchian_trades.csv';
 const ML_LOG      = DIR + '/turtle_ml.jsonl';
 const ERROR_LOG   = DIR + '/bot_errors.jsonl';
+let analyzer;
+try { analyzer = require('./analyzer.js'); }
+catch (e) { analyzer = null; }
+
 let aiReport;
 try { aiReport = require('./ai-report.js'); }
 catch (e) { aiReport = { isEnabled: () => false, buildDailyReport: async () => null }; }
 
-const CSV_HEADER  = 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,fee_live,fee_estimate,pnl_live,pnl_estimate,pnl_source,sl_placed,efficiency_ratio,peak_bar,trough_bar\n';
+const CSV_HEADER  = 'num,symbol,entry_time,exit_time,dir,entry,exit,qty,pnl,r_multiple,reason,hold_hours,mfe,mae,risk_amt,atr,equity,mode,entry_fill,exit_fill,slip_entry_bps,slip_exit_bps,fee_live,fee_estimate,pnl_live,pnl_estimate,pnl_source,funding_live,funding_count,funding_estimate,trail_moves,be_bar,mae_r,mae_pct_equity,mfe_r,fill_latency_ms,entry_fills,sl_placed,efficiency_ratio,peak_bar,trough_bar\n';
 
 // ══════════════════════════════════════════════════════════
 //  MARKETS — parameter แยกต่อเหรียญ (เพิ่ม/ลบเหรียญได้ที่นี่)
@@ -585,8 +589,9 @@ async function checkSignal(symbol) {
       // BREAKEVEN: ลอยถึง +1R → ดัน SL มาที่ entry (ไม่ยอมให้พลิกขาดทุน)
       if (beHit && newSL < position.entry) newSL = position.entry;
       if (newSL > position.sl) {
-        if (!position.beDone && beHit && newSL === position.entry) position.beDone = true;
+        if (!position.beDone && beHit && newSL === position.entry) { position.beDone = true; position.beBar = position.bars; }
         position.sl = newSL; slMovedForLive = true;
+        position.trailMoves = (position.trailMoves || 0) + 1;
       }
       if (price <= position.sl) exitReason = 'TRAIL_SL';
       else if (price < exitLow) exitReason = 'DONCHIAN_EXIT';
@@ -596,8 +601,9 @@ async function checkSignal(symbol) {
       let newSL = position.peak + atr * cfg.trailATR;
       if (beHit && newSL > position.entry) newSL = position.entry;
       if (newSL < position.sl) {
-        if (!position.beDone && beHit && newSL === position.entry) position.beDone = true;
+        if (!position.beDone && beHit && newSL === position.entry) { position.beDone = true; position.beBar = position.bars; }
         position.sl = newSL; slMovedForLive = true;
+        position.trailMoves = (position.trailMoves || 0) + 1;
       }
       if (price >= position.sl) exitReason = 'TRAIL_SL';
       else if (price > exitHigh) exitReason = 'DONCHIAN_EXIT';
@@ -734,7 +740,9 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
   };
 
   const riskAmt = Math.abs(entry - sl) * qty;
-  positions[symbol] = { symbol, dir, entry, sl, peak: entry, trough: entry, peakBar: 0, troughBar: 0, qty, bars: 0, atr,
+  const orderSentTs = Date.now();
+  positions[symbol] = { symbol, dir, entry, sl, peak: entry, trough: entry, peakBar: 0, troughBar: 0,
+    trailMoves: 0, beBar: null, orderSentTs, qty, bars: 0, atr,
     initialSL: sl, riskAmt, entryTs: Date.now(), beDone: false, features };
 
   let liveInfo = '';
@@ -754,6 +762,8 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
       const fp = r.fillPrice;
       positions[symbol].liveEntryFill = fp;
       positions[symbol].entryFeeLive = r.fee ?? null;
+      positions[symbol].fillLatencyMs = Date.now() - orderSentTs;
+      positions[symbol].entryFills = r.fills ?? null;
       // ── partial fill: ได้ qty ไม่เท่าที่สั่ง → ต้องใช้ของจริง ──
       // ไม่งั้น SL วางผิดจำนวน + PnL/risk คำนวณผิด
       if (r.fillQty && Math.abs(r.fillQty - qty) / qty > 0.001) {
@@ -876,6 +886,14 @@ async function closePosition(symbol, exit, reason) {
   }
 
   const bars = Math.max(0, Math.round((Date.now() - entryTs) / 3600000));   // กัน entryTs เพี้ยน
+  // ── funding จริงที่จ่าย/ได้รับระหว่างถือ (backtest ประมาณคงที่ ของจริงแกว่งมาก) ──
+  let fundingLive = null, fundingCount = null;
+  if (live.isEnabled() && live.getFundingPaid) {
+    try {
+      const fd = await live.getFundingPaid(symbol, entryTs, Date.now());
+      if (fd) { fundingLive = fd.total; fundingCount = fd.count; }
+    } catch (e) {}
+  }
   // ── ใช้ราคา fill จริงถ้ามี (ไม่งั้น equity เพี้ยนจากบัญชีจริงสะสมทุกไม้) ──
   const realEntry = position.liveEntryFill || entry;
   const realExit  = exitFill || exit;
@@ -943,6 +961,18 @@ async function closePosition(symbol, exit, reason) {
     pnlLive: liveRealizedPnl,
     pnlEstimate: +pnlEstimate.toFixed(2),
     pnlSource: usingLivePnl ? 'exchange' : 'estimate',
+    // ── funding จริง vs ประมาณ (ตัวกินกำไรเงียบๆ ของ trend-following) ──
+    fundingLive, fundingCount,
+    fundingEstimate: +fundingCost.toFixed(4),
+    // ── พฤติกรรมระหว่างถือ ──
+    trailMoves: position.trailMoves ?? 0,
+    beBar: position.beBar ?? null,
+    maeR: riskAmt > 0 ? +(mae / riskAmt).toFixed(3) : null,
+    maePctEquity: +(Math.abs(mae) / accountEquity * 100).toFixed(3),
+    mfeR: riskAmt > 0 ? +(mfe / riskAmt).toFixed(3) : null,
+    // ── execution quality ──
+    fillLatencyMs: position.fillLatencyMs ?? null,
+    entryFills: position.entryFills ?? null,
     slPlaced: position.slPlaced ?? null,
     entryOrderId: position.entryOrderId ?? null,
     // ── บริบทตลาด + จังหวะ ──
@@ -1005,6 +1035,18 @@ function logML(features, trade) {
       reason: trade.reason,
       holdHours: trade.bars,
       mfe: trade.mfe,
+      mae: trade.mae,
+      mfeR: trade.mfeR ?? null,
+      maeR: trade.maeR ?? null,
+      peakBar: trade.peakBar ?? null,
+      troughBar: trade.troughBar ?? null,
+      trailMoves: trade.trailMoves ?? null,
+      beBar: trade.beBar ?? null,
+      fundingLive: trade.fundingLive ?? null,
+      fundingEstimate: trade.fundingEstimate ?? null,
+      feeLive: trade.feeLive ?? null,
+      pnlSource: trade.pnlSource ?? null,
+      fillLatencyMs: trade.fillLatencyMs ?? null,
       slipEntryBps: trade.slipEntryBps ?? null,
       slipExitBps: trade.slipExitBps ?? null,
       efficiencyRatio: trade.efficiencyRatio ?? null,
@@ -1025,7 +1067,7 @@ function logTradeCSV(t) {
     const et = new Date(t.entryTs).toISOString();
     const xt = new Date(t.exitTs).toISOString();
     const nz = v => (v === null || v === undefined) ? '' : v;
-    const row = `${t.num},${t.symbol||'ETHUSDT'},${et},${xt},${t.dir},${t.entry},${t.exit},${t.qty},${t.pnl},${t.rMultiple},${t.reason},${t.bars},${t.mfe},${t.mae},${t.riskAmt},${t.atr},${t.equity},${nz(t.mode)},${nz(t.entryFill)},${nz(t.exitFill)},${nz(t.slipEntryBps)},${nz(t.slipExitBps)},${nz(t.feeLive)},${nz(t.feeEstimate)},${nz(t.pnlLive)},${nz(t.pnlEstimate)},${nz(t.pnlSource)},${nz(t.slPlaced)},${nz(t.efficiencyRatio)},${nz(t.peakBar)},${nz(t.troughBar)}\n`;
+    const row = `${t.num},${t.symbol||'ETHUSDT'},${et},${xt},${t.dir},${t.entry},${t.exit},${t.qty},${t.pnl},${t.rMultiple},${t.reason},${t.bars},${t.mfe},${t.mae},${t.riskAmt},${t.atr},${t.equity},${nz(t.mode)},${nz(t.entryFill)},${nz(t.exitFill)},${nz(t.slipEntryBps)},${nz(t.slipExitBps)},${nz(t.feeLive)},${nz(t.feeEstimate)},${nz(t.pnlLive)},${nz(t.pnlEstimate)},${nz(t.pnlSource)},${nz(t.fundingLive)},${nz(t.fundingCount)},${nz(t.fundingEstimate)},${nz(t.trailMoves)},${nz(t.beBar)},${nz(t.maeR)},${nz(t.maePctEquity)},${nz(t.mfeR)},${nz(t.fillLatencyMs)},${nz(t.entryFills)},${nz(t.slPlaced)},${nz(t.efficiencyRatio)},${nz(t.peakBar)},${nz(t.troughBar)}\n`;
     fs.appendFileSync(TRADE_CSV, row);
   } catch (e) {}
 }
@@ -1045,6 +1087,21 @@ function logEquitySnapshot() {
 }
 
 // ── รายงานวิเคราะห์ด้วย AI (ถ้าตั้ง ANTHROPIC_API_KEY) ──
+// ── รายงานวิเคราะห์ (คำนวณเอง ไม่ต้องใช้ API ภายนอก) ──
+async function sendAnalysis(manual = false) {
+  if (!analyzer) {
+    if (manual) await tg('⚠️ ไม่พบ analyzer.js บน VM');
+    return;
+  }
+  try {
+    const r = analyzer.analyze(DIR);
+    await tg(r.text);
+  } catch (e) {
+    await logError('warn', 'ANALYSIS_FAILED', null, e.message);
+    if (manual) await tg(`⚠️ วิเคราะห์ไม่สำเร็จ: ${e.message}`);
+  }
+}
+
 async function sendAiReport(manual = false) {
   if (!aiReport.isEnabled()) {
     if (manual) await tg('⚠️ ยังไม่ได้ตั้ง ANTHROPIC_API_KEY ใน .env — รายงาน AI ปิดอยู่');
@@ -1179,6 +1236,8 @@ async function pollTelegram() {
           `ข้อมูลไม่ตรงกัน: ${health.desyncAlerts}\n\n` +
           `error 24 ชม.: ${last24.length} (ร้ายแรง ${crit.length})\n` +
           (health.lastError ? `\nล่าสุด: ${health.lastError.kind}\n${health.lastError.tsLocal}\n${health.lastError.message.slice(0,120)}` : '\nยังไม่มี error ✅'));
+      } else if (text === '/analyze' || text === '/วิเคราะห์' || text === '/a') {
+        await sendAnalysis(true);
       } else if (text === '/report' || text === '/รายงาน') {
         await tg('🤖 กำลังวิเคราะห์ข้อมูล...');
         await sendAiReport(true);
@@ -1574,6 +1633,7 @@ setInterval(async () => {
   if (utcH === 13 && day !== lastSummaryDay) {
     lastSummaryDay = day;
     await sendDailySummary();
-    await sendAiReport();      // รายงาน AI ตามหลัง (20:00 ไทย)
+    await sendAnalysis();      // วิเคราะห์เอง (ไม่ต้องใช้ API)
+    await sendAiReport();      // AI เสริม (ถ้ามี ANTHROPIC_API_KEY)
   }
 }, 5 * 60 * 1000);
