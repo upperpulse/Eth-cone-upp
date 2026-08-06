@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v4.1';
+const BOT_VERSION = 'v4.3';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -842,7 +842,7 @@ async function closePosition(symbol, exit, reason) {
     }
   }
   if (live.isEnabled() && !alreadyClosedOnExchange) {
-    let closed = false, closeErr = null;
+    let closed = false, closeErr = null, alreadyGone = false;
     // ลองปิด 3 ครั้ง (เผื่อเน็ต/API สะดุดชั่วคราว)
     for (let attempt = 1; attempt <= 3 && !closed; attempt++) {
       try {
@@ -861,9 +861,35 @@ async function closePosition(symbol, exit, reason) {
         if (attempt > 1) await logError('warn', 'CLOSE_RETRY_OK', symbol, `ปิดสำเร็จในครั้งที่ ${attempt}`);
       } catch (e) {
         closeErr = e.message;
+        // -2022 ReduceOnly rejected / -2011 Unknown order
+        // = ไม่มี position ให้ปิดแล้ว (SL บน exchange ปิดไปก่อน) — ไม่ต้อง retry
+        if (/-2022|-2011|ReduceOnly Order is rejected|Unknown order/i.test(closeErr)) {
+          alreadyGone = true;
+          break;
+        }
         if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
       }
     }
+    // position ถูกปิดบน exchange ไปแล้ว → เก็บผลจริงแล้วปิดในระบบ (ไม่ใช่ error)
+    if (alreadyGone) {
+      closed = true;
+      if (live.getExitFillFromHistory) {
+        try {
+          const fh = await live.getExitFillFromHistory(symbol, dir, entryTs);
+          if (fh) {
+            exitFill = fh.price;
+            liveFeeExit = fh.fee;
+            liveRealizedPnl = fh.realizedPnl;
+            const sa = dir === 'long' ? exit - fh.price : fh.price - exit;
+            slipExit = +((sa / exit) * 10000).toFixed(2);
+          }
+        } catch (e) {}
+      }
+      if (live.sweepStops) { try { await live.sweepStops(symbol, null); } catch (e) {} }
+      await logError('info', 'CLOSED_BY_EXCHANGE', symbol,
+        `SL บน exchange ปิดไม้ให้แล้ว (ReduceOnly rejected) — บันทึกผลจริง${exitFill ? ` ที่ $${f(exitFill)}` : ''}`);
+    }
+
     // 🔴 ปิดไม่ออกทั้ง 3 ครั้ง → ห้ามลบ position ออกจากระบบ
     if (!closed) {
       health.closeErrors++;
@@ -1414,6 +1440,44 @@ async function pollTelegram() {
 
 // ═══════════════ HTTP SERVER ═══════════════
 const PORT = process.env.DONCHIAN_PORT || 3100;
+const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN || '';
+
+const LOGIN_PAGE = `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Turtle Pro</title>
+<style>
+body{font-family:-apple-system,'Segoe UI',sans-serif;background:#F5F0E6;color:#3E2F1C;
+display:grid;place-items:center;min-height:100vh;margin:0;padding:20px}
+.box{background:#C4A878;border:1px solid #A8895E;border-radius:16px;padding:28px;max-width:340px;width:100%;text-align:center}
+.turtle{font-size:44px;margin-bottom:10px}
+h1{font-size:19px;margin:0 0 6px}
+p{font-size:13px;color:#6B5544;margin:0 0 18px}
+input{width:100%;padding:13px;border:1px solid #A8895E;border-radius:10px;font-size:16px;
+background:#F5F0E6;color:#3E2F1C;box-sizing:border-box;margin-bottom:11px;font-family:inherit}
+button{width:100%;padding:13px;border:0;border-radius:10px;background:#3E2F1C;color:#F5F0E6;
+font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
+button:active{opacity:.85}
+.err{color:#B5543A;font-size:13px;margin-top:11px;min-height:18px}
+</style></head><body>
+<div class="box">
+  <div class="turtle">🐢</div>
+  <h1>Turtle Pro</h1>
+  <p>ใส่รหัสผ่านเพื่อเข้าดู</p>
+  <input type="password" id="t" placeholder="รหัสผ่าน" autocomplete="current-password">
+  <button onclick="go()">เข้าสู่ระบบ</button>
+  <div class="err" id="e"></div>
+</div>
+<script>
+const saved = localStorage.getItem('turtle_token');
+if (saved) location.replace('/ui?t=' + encodeURIComponent(saved));
+async function go(){
+  const v = document.getElementById('t').value.trim();
+  if (!v) return;
+  const r = await fetch('/dashboard?t=' + encodeURIComponent(v));
+  if (r.ok) { localStorage.setItem('turtle_token', v); location.replace('/ui?t=' + encodeURIComponent(v)); }
+  else { document.getElementById('e').textContent = 'รหัสไม่ถูกต้อง'; localStorage.removeItem('turtle_token'); }
+}
+document.getElementById('t').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+</script></body></html>`;
 
 // cache ราคา+channel ล่าสุด (อัพเดตทุก checkSignal)
 let dashCache = {};   // { ETHUSDT: {price, channel, atr, updatedAt}, SOLUSDT: {...} }
@@ -1512,19 +1576,57 @@ function buildDashboardData() {
 }
 
 http.createServer((req, res) => {
-  // CORS — ให้ dashboard (GitHub Pages) เรียกได้
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'ngrok-skip-browser-warning, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'ngrok-skip-browser-warning, Content-Type, X-Dashboard-Token');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-  if (req.url.split('?')[0] === '/health') {
+
+  const url = new URL(req.url, 'http://x');
+  const route = url.pathname;
+
+  // ── ตรวจ token (ถ้าตั้งไว้) — รับได้ทั้ง header และ query ?t= ──
+  // ไม่ตั้ง DASHBOARD_TOKEN = เปิดสาธารณะเหมือนเดิม (เตือนตอน start)
+  function authorized() {
+    if (!DASHBOARD_TOKEN) return true;
+    const given = req.headers['x-dashboard-token'] || url.searchParams.get('t') || '';
+    if (given.length !== DASHBOARD_TOKEN.length) return false;
+    // เทียบแบบ constant-time กัน timing attack
+    let diff = 0;
+    for (let i = 0; i < DASHBOARD_TOKEN.length; i++) diff |= given.charCodeAt(i) ^ DASHBOARD_TOKEN.charCodeAt(i);
+    return diff === 0;
+  }
+  function deny() {
+    res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ error: 'unauthorized', message: 'ต้องใส่รหัสผ่าน' }));
+  }
+
+  if (route === '/ping') {
+    // เช็คว่าบอทยังมีชีวิต — ไม่เปิดเผยข้อมูลอะไร (ใช้กับ uptime monitor ได้)
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, version: BOT_VERSION, needAuth: !!DASHBOARD_TOKEN }));
+    return;
+  }
+
+  if (route === '/health') {
+    if (!authorized()) return deny();
+    const open = SYMBOLS.filter(s2 => positions[s2]).map(s2 => ({ symbol: s2, dir: positions[s2].dir }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      version: BOT_VERSION, equity: accountEquity, trades: trades.length,
-      position: position ? position.dir : null, halted
+      version: BOT_VERSION, mode: live.modeLabel(),
+      equity: +accountEquity.toFixed(2), startEquity: +startEquity.toFixed(2),
+      trades: trades.length, positions: open, halted,
+      apiFailStreak: health.apiFailStreak
     }));
-  } else if (req.url.split('?')[0] === '/ui' || req.url.split('?')[0] === '/') {
-    // เสิร์ฟหน้า dashboard ตรงจาก VM (ไม่ต้องพึ่ง GitHub Pages)
+    return;
+  }
+
+  if (route === '/ui' || route === '/') {
+    if (!authorized()) {
+      // ส่งหน้าใส่รหัสแทน (ไม่ใช่ 401 เปล่าๆ)
+      res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(LOGIN_PAGE);
+      return;
+    }
     try {
       const html = fs.readFileSync(DIR + '/turtle-dashboard.html', 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -1533,10 +1635,17 @@ http.createServer((req, res) => {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('ไม่พบ turtle-dashboard.html บน VM');
     }
-  } else if (req.url.split('?')[0] === '/dashboard') {
+    return;
+  }
+
+  if (route === '/dashboard') {
+    if (!authorized()) return deny();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(buildDashboardData()));
-  } else { res.writeHead(404); res.end(); }
+    return;
+  }
+
+  res.writeHead(404); res.end();
 }).listen(PORT, () => console.log(`ETH Turtle Pro server :${PORT} (/health /dashboard)`));
 
 // ═══════════════ STARTUP ═══════════════
@@ -1547,6 +1656,8 @@ const mktSummary = SYMBOLS.map(s2 => {
 }).join('\n');
 console.log(`🐢 Turtle Pro ${BOT_VERSION} — Multi-Market (${SYMBOLS.map(s2=>MARKETS[s2].label).join('+')})`);
 console.log(mktSummary.split('\n').map(x=>'   '+x).join('\n'));
+if (!DASHBOARD_TOKEN) console.log('⚠️  ไม่ได้ตั้ง DASHBOARD_TOKEN — dashboard เปิดสาธารณะ (ใครมี URL ก็ดูได้)');
+else console.log('🔒 dashboard ล็อกด้วยรหัสผ่านแล้ว');
 console.log(`Risk ${(RISK_PER_TRADE*100).toFixed(2)}%/trade (equity รวม) | MaxDD ${MAX_DRAWDOWN_PCT*100}% | Equity $${accountEquity.toFixed(2)} | Mode: ${live.modeLabel()}`);
 if (live.isEnabled()) { live.setLeverage(SYMBOLS); }
 
