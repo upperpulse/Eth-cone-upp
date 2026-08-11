@@ -297,7 +297,9 @@ async function openLive(dir, qty, stopPrice, symbol) {
   const out = { stopPlaced: false };
   try {
     const entrySide = dir === 'long' ? 'BUY' : 'SELL';
+    const t0 = Date.now();
     const entry = await placeMarketOrder(symbol, entrySide, qty);
+    out.orderLatencyMs = Date.now() - t0;   // เวลาส่ง order จริง (ไม่รวม retry ดึง fill)
     out.entry = entry;
     out.orderId = entry.orderId;
     out.fillPrice = parseFloat(entry.avgPrice) || null;
@@ -383,14 +385,19 @@ async function getFundingPaid(symbol, startTime, endTime) {
   } catch (e) { return null; }
 }
 
-async function testConnection() {
+let _connCache = { ts: 0, data: null };
+async function testConnection(maxAgeMs = 60000) {
   if (!enabled) return { ok: false, reason: 'disabled (ยังไม่เปิด LIVE_MODE หรือไม่มี key)' };
+  // cache 1 นาที — reconcile + AI report + /health เรียกซ้ำกันบ่อย
+  if (_connCache.data && Date.now() - _connCache.ts < maxAgeMs) return _connCache.data;
   try {
     const acct = await binanceRequest('GET', '/fapi/v2/account', {});
     const usdt = acct.assets?.find(a => a.asset === 'USDT');
-    return { ok: true, mode: modeLabel(),
+    const out = { ok: true, mode: modeLabel(),
              balance: usdt ? parseFloat(usdt.walletBalance) : 0,
              available: usdt ? parseFloat(usdt.availableBalance) : 0 };
+    _connCache = { ts: Date.now(), data: out };
+    return out;
   } catch (e) { return { ok: false, reason: e.message }; }
 }
 

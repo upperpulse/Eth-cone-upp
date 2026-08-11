@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v4.3';
+const BOT_VERSION = 'v4.4';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -581,6 +581,9 @@ async function checkSignal(symbol) {
       ? ((position.dir === 'long' ? price - position.entry : position.entry - price) * position.qty) / position.riskAmt
       : 0;
     const beHit = cfg.breakevenAtR > 0 && curR >= cfg.breakevenAtR;
+    // อัพเดตชั่วโมงที่ถือ — ใช้ entryTs จริง (ทนต่อ restart)
+    // ต้องอัพเดตก่อนบันทึก peakBar/troughBar ไม่งั้นได้ 0 ตลอด
+    position.bars = Math.max(0, Math.round((Date.now() - position.entryTs) / 3600000));
 
     if (position.dir === 'long') {
       if (price < position.trough) { position.trough = price; position.troughBar = position.bars; }
@@ -762,7 +765,7 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
       const fp = r.fillPrice;
       positions[symbol].liveEntryFill = fp;
       positions[symbol].entryFeeLive = r.fee ?? null;
-      positions[symbol].fillLatencyMs = Date.now() - orderSentTs;
+      positions[symbol].fillLatencyMs = r.orderLatencyMs ?? (Date.now() - orderSentTs);
       positions[symbol].entryFills = r.fills ?? null;
       // ── partial fill: ได้ qty ไม่เท่าที่สั่ง → ต้องใช้ของจริง ──
       // ไม่งั้น SL วางผิดจำนวน + PnL/risk คำนวณผิด
