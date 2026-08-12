@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v4.4';
+const BOT_VERSION = 'v4.6';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -592,9 +592,13 @@ async function checkSignal(symbol) {
       // BREAKEVEN: ลอยถึง +1R → ดัน SL มาที่ entry (ไม่ยอมให้พลิกขาดทุน)
       if (beHit && newSL < position.entry) newSL = position.entry;
       if (newSL > position.sl) {
-        if (!position.beDone && beHit && newSL === position.entry) { position.beDone = true; position.beBar = position.bars; }
         position.sl = newSL; slMovedForLive = true;
         position.trailMoves = (position.trailMoves || 0) + 1;
+      }
+      // ล็อกทุนแล้ว = SL อยู่ที่ entry หรือดีกว่า (ไม่ใช่แค่ตอนเท่ากับ entry เป๊ะ)
+      // เดิมเช็ค === entry ทำให้ไม้ที่กำไรเร็ว (trail เลย entry ไปเลย) ไม่เคยถูกบันทึก
+      if (!position.beDone && position.sl >= position.entry) {
+        position.beDone = true; position.beBar = position.bars;
       }
       if (price <= position.sl) exitReason = 'TRAIL_SL';
       else if (price < exitLow) exitReason = 'DONCHIAN_EXIT';
@@ -604,9 +608,11 @@ async function checkSignal(symbol) {
       let newSL = position.peak + atr * cfg.trailATR;
       if (beHit && newSL > position.entry) newSL = position.entry;
       if (newSL < position.sl) {
-        if (!position.beDone && beHit && newSL === position.entry) { position.beDone = true; position.beBar = position.bars; }
         position.sl = newSL; slMovedForLive = true;
         position.trailMoves = (position.trailMoves || 0) + 1;
+      }
+      if (!position.beDone && position.sl <= position.entry) {
+        position.beDone = true; position.beBar = position.bars;
       }
       if (price >= position.sl) exitReason = 'TRAIL_SL';
       else if (price > exitHigh) exitReason = 'DONCHIAN_EXIT';
@@ -774,9 +780,14 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
         positions[symbol].qty = r.fillQty;
         positions[symbol].liveFillQty = r.fillQty;
         positions[symbol].riskAmt = Math.abs(entry - sl) * r.fillQty;
-        await logError('warn', 'PARTIAL_FILL', symbol,
-          `สั่ง ${oldQty} ได้จริง ${r.fillQty} — ปรับ qty/risk ตามของจริงแล้ว`,
-          { ordered: oldQty, filled: r.fillQty });
+        const newRiskPct = positions[symbol].riskAmt / accountEquity * 100;
+        const over = newRiskPct > RISK_PER_TRADE * 100 * 1.05;   // เกิน 5% ของที่ตั้งไว้
+        await logError(over ? 'critical' : 'warn', over ? 'FILL_RISK_EXCEEDED' : 'PARTIAL_FILL', symbol,
+          over
+            ? `fill ${r.fillQty} เกินที่สั่ง ${oldQty} → risk จริง ${newRiskPct.toFixed(2)}% (ตั้งไว้ ${(RISK_PER_TRADE*100).toFixed(2)}%)`
+            : `สั่ง ${oldQty} ได้จริง ${r.fillQty} — ปรับ qty/risk ตามของจริงแล้ว`,
+          { ordered: oldQty, filled: r.fillQty, riskPct: +newRiskPct.toFixed(3),
+            targetPct: +(RISK_PER_TRADE*100).toFixed(2) });
       } else if (r.fillQty) {
         positions[symbol].liveFillQty = r.fillQty;
       }

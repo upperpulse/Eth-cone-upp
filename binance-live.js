@@ -70,12 +70,13 @@ async function placeMarketOrder(symbol, side, qty, reduceOnly = false) {
 
 // ── ดึงราคา fill จริง (MARKET order คืน avgPrice='0' ตอนแรก) ──
 // รวมทุก partial fill แล้วถัวเฉลี่ยถ่วงน้ำหนัก + คืน fee/realizedPnl ด้วย
-async function getFillPrice(symbol, orderId, retries = 3) {
+async function getFillPrice(symbol, orderId, retries = 4) {
   if (!enabled || !orderId) return null;
   for (let i = 0; i < retries; i++) {
-    await new Promise(r => setTimeout(r, 400 * (i + 1)));
+    await new Promise(r => setTimeout(r, 500 * (i + 1)));
     try {
-      const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 20 });
+      // limit 1000 — order ใหญ่แตกเป็นสิบๆ ชิ้น ถ้าใช้ 20 จะหาไม่เจอ
+      const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 1000 });
       if (!Array.isArray(trades)) continue;
       const mine = trades.filter(t => String(t.orderId) === String(orderId));
       if (!mine.length) continue;
@@ -90,6 +91,15 @@ async function getFillPrice(symbol, orderId, retries = 3) {
                             fee: +fee.toFixed(6), realizedPnl: +pnl.toFixed(6), fills: mine.length };
     } catch (e) {}
   }
+  // fallback: ถาม order โดยตรง (บาง endpoint คืน avgPrice หลัง fill เสร็จ)
+  try {
+    const od = await raw('GET', '/fapi/v1/order', { symbol, orderId });
+    const ap = parseFloat(od && od.avgPrice);
+    if (ap > 0) {
+      return { price: +ap.toFixed(6), qty: parseFloat(od.executedQty) || null,
+               fee: null, realizedPnl: null, fills: null, source: 'orderQuery' };
+    }
+  } catch (e) {}
   return null;
 }
 
@@ -98,7 +108,7 @@ async function getFillPrice(symbol, orderId, retries = 3) {
 async function getExitFillFromHistory(symbol, dir, sinceTs) {
   if (!enabled) return null;
   try {
-    const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 50 });
+    const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 1000 });
     if (!Array.isArray(trades)) return null;
     const closeSide = dir === 'long' ? 'SELL' : 'BUY';
     const mine = trades.filter(t =>
