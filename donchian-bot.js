@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v4.6';
+const BOT_VERSION = 'v4.8';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -335,19 +335,28 @@ async function reconcile() {
           floatPnl += p2.dir === 'long' ? (px - p2.entry) * p2.qty : (p2.entry - px) * p2.qty;
         }
         if (floatPnl === null) return;   // ไม่รู้ราคาปัจจุบัน → ข้ามการเทียบรอบนี้
-        const drift = conn.balance - floatPnl - accountEquity;
+        // balance บน exchange รวมกำไรลอย → หักออกก่อนเทียบกับ equity ที่ bot จด (realized เท่านั้น)
+        const exchangeRealized = conn.balance - floatPnl;
+        const drift = exchangeRealized - accountEquity;
         const driftPct = Math.abs(drift) / conn.balance * 100;
-        if (driftPct > 0.5) {
-          await logError(driftPct > 3 ? 'critical' : 'warn', 'EQUITY_DRIFT', null,
-            `equity บอท $${f(accountEquity)} ≠ Binance $${f(conn.balance)} (ต่าง $${f(drift)} = ${driftPct.toFixed(2)}%)`,
-            { bot: +accountEquity.toFixed(2), exchange: conn.balance, drift: +drift.toFixed(2) });
+        // 0.5% ต่ำเกิน — fee/funding ที่ยังไม่ settle ทำให้ต่างเล็กน้อยเป็นปกติ
+        // ใช้ 1.5% (≈ $70 จาก $4,700) และเตือนซ้ำไม่เกิน 1 ครั้ง/ชม.
+        const now = Date.now();
+        if (driftPct > 1.5 && now - (health.lastDriftAlert || 0) > 3600000) {
+          health.lastDriftAlert = now;
+          await logError(driftPct > 4 ? 'critical' : 'warn', 'EQUITY_DRIFT', null,
+            `equity bot $${f(accountEquity)} vs exchange(realized) $${f(exchangeRealized)} — ต่าง $${f(drift)} (${driftPct.toFixed(2)}%)` +
+            (floatPnl ? ` [balance $${f(conn.balance)} − กำไรลอย $${f(floatPnl)}]` : ''),
+            { bot: +accountEquity.toFixed(2), exchangeBalance: conn.balance,
+              floatPnl: +floatPnl.toFixed(2), exchangeRealized: +exchangeRealized.toFixed(2),
+              drift: +drift.toFixed(2), driftPct: +driftPct.toFixed(3) });
           // FLAT อยู่ = ปลอดภัยที่จะ sync ให้ตรง (ไม่มี position ค้างให้คำนวณผิด)
           if (flat) {
             const old = accountEquity;
             accountEquity = conn.balance;
             if (accountEquity > peakEquity) peakEquity = accountEquity;
             saveState();
-            await tg(`🔄 <b>ปรับ equity ให้ตรง Binance</b>\n$${f(old)} → $${f(conn.balance)}\n(ต่าง $${f(drift)} จาก fee/slippage สะสม)`);
+            await tg(`🔄 <b>ปรับ equity ให้ตรง Binance</b>\n$${f(old)} → $${f(conn.balance)}\n(ต่าง $${f(drift)} จาก fee/funding สะสม)`);
           }
         }
         health.lastBalance = conn.balance;
@@ -1680,7 +1689,7 @@ if (live.isEnabled() && live.testConnection) {
   (async () => {
     const conn = await live.testConnection();
     if (conn.ok) {
-      console.log(`[LIVE] เชื่อมต่อ ${conn.mode} สำเร็จ | balance ${conn.balance} USDT | available ${conn.available}`);
+      console.log(`[LIVE] เชื่อมต่อ ${conn.mode || live.modeLabel()} สำเร็จ | balance ${conn.balance} USDT | available ${conn.available}`);
       // sync equity จาก balance จริง (ครั้งแรกเท่านั้น — ถ้า state ยังเป็นค่า default)
       if (accountEquity === ACCOUNT_SIZE && conn.balance > 0) {
         accountEquity = conn.balance;
@@ -1722,7 +1731,7 @@ if (live.isEnabled() && live.testConnection) {
           await tg(`⚠️ <b>${MARKETS[sym].label}: พบ position ค้างบน Binance</b>\n${livePos.dir.toUpperCase()} ${livePos.qty} @ $${livePos.entry}\n\nแนะนำปิดเองใน Binance ก่อน หรือ /close_${MARKETS[sym].label.toLowerCase()}`);
         }
       }
-      await tg(`🔗 <b>เชื่อมต่อ ${conn.mode}</b>\nBalance: ${conn.balance} USDT\nAvailable: ${conn.available} USDT`);
+      await tg(`🔗 <b>เชื่อมต่อ ${conn.mode || live.modeLabel()}</b>\nBalance: ${conn.balance} USDT\nAvailable: ${conn.available} USDT`);
     } else {
       console.error(`[LIVE] เชื่อมต่อล้มเหลว: ${conn.reason}`);
       await tg(`🔴 <b>เชื่อมต่อ Binance ล้มเหลว</b>\n${conn.reason}\n\nเช็ค API key/secret ใน .env`);

@@ -186,6 +186,7 @@ async function placeStopOrder(symbol, side, qty, stopPrice) {
     }
   }
   lastStop[symbol] = { id: result.id, isAlgo: result.isAlgo };
+  invalidateStopsCache(symbol);
   console.log(`[LIVE] ${symbol} STOP ${side} @ ${stopPrice.toFixed(pStep(symbol))} → ${result.isAlgo ? 'algoId' : 'orderId'} ${result.id}`);
   return { orderId: result.id, algoId: result.isAlgo ? result.id : undefined, isAlgo: result.isAlgo };
 }
@@ -199,6 +200,7 @@ async function cancelStop(symbol, ref) {
     if (isAlgo) await binanceRequest('DELETE', '/fapi/v1/algoOrder', { symbol, algoId: id });
     else await binanceRequest('DELETE', '/fapi/v1/order', { symbol, orderId: id });
     console.log(`[LIVE] ${symbol} cancelled stop ${id}`);
+    invalidateStopsCache(symbol);
     return true;
   } catch (e) {
     // -2011 Unknown order = ไม่มีอยู่แล้ว ถือว่าสำเร็จ
@@ -226,8 +228,12 @@ const cancelOrder = (symbol, orderId) => cancelStop(symbol, orderId);
 
 // ── ดู stop order ที่เปิดอยู่ (รวมทั้ง 2 แบบ) ──
 // throw เมื่อเช็คไม่ได้ — ห้ามคืน [] แล้วให้เข้าใจผิดว่า "ไม่มี SL"
-async function getOpenStops(symbol) {
+const _stopsCache = {};
+async function getOpenStops(symbol, maxAgeMs = 30000) {
   if (!enabled) return [];
+  const ck = symbol || '_all';
+  const c0 = _stopsCache[ck];
+  if (c0 && Date.now() - c0.ts < maxAgeMs) return c0.data;
   const out = [];
   let algoOk = false, stdOk = false, lastErr = null;
   try {
@@ -256,7 +262,12 @@ async function getOpenStops(symbol) {
   } catch (e) { lastErr = lastErr || `openOrders: ${e.message}`; }
   // ทั้งสอง endpoint ล้มเหลว = เช็คไม่ได้จริง ห้ามสรุปว่าไม่มี SL
   if (!algoOk && !stdOk) throw new Error(`เช็ค stop order ไม่ได้ — ${lastErr || 'ไม่ทราบสาเหตุ'}`);
+  _stopsCache[ck] = { ts: Date.now(), data: out };
   return out;
+}
+// ล้าง cache เมื่อมีการเปลี่ยนแปลง stop order (วาง/ลบ)
+function invalidateStopsCache(symbol) {
+  delete _stopsCache[symbol]; delete _stopsCache['_all'];
 }
 const getOpenOrders = getOpenStops;
 
@@ -415,6 +426,6 @@ module.exports = {
   isEnabled, modeLabel, stopApiMode, setLeverage,
   openLive, closeLive, trailStopLive,
   placeMarketOrder, placeStopOrder, cancelOrder, cancelStop,
-  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops, getFillPrice, getExitFillFromHistory, getFundingPaid,
+  getPositionLive, testConnection, getOpenOrders, getOpenStops, adoptStopOrders, sweepStops, getFillPrice, invalidateStopsCache, getExitFillFromHistory, getFundingPaid,
   _sign: sign, _config: { LIVE_MODE, USE_TESTNET, BASE, LEVERAGE }
 };
