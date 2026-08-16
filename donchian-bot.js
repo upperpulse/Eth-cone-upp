@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v4.8';
+const BOT_VERSION = 'v5.0';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -322,7 +322,7 @@ async function reconcile() {
   // ── ตรวจ equity บอท vs balance จริง (ตัวเลขเพี้ยน = risk sizing ผิดทุกไม้) ──
   if (live.testConnection) {
     try {
-      const conn = await live.testConnection();
+      const conn = await live.testConnection(5 * 60 * 1000);   // cache 5 นาที ลด API call
       if (conn.ok && conn.balance > 0) {
         const flat = SYMBOLS.every(s2 => !positions[s2]);
         // ตอนถือ position: balance บน exchange รวมกำไรลอยแล้ว ต้องหักออกก่อนเทียบ
@@ -370,8 +370,16 @@ async function reconcile() {
     catch (e) {
       // เรียกไม่สำเร็จ ≠ ไม่มี position — ข้ามรอบนี้ ห้ามสรุปว่า desync
       if (/-1003|too many request|banned/i.test(e.message)) {
-        reconcileBackoffUntil = Date.now() + 30 * 60 * 1000;   // พัก 30 นาที
-        await logError('warn', 'RATE_LIMITED', symbol, `โดน rate limit — พัก reconcile 30 นาที`);
+        // โดนซ้ำ → พักนานขึ้นเรื่อยๆ (30 → 60 → 120 นาที สูงสุด 3 ชม.)
+        health.rateLimitHits = (health.rateLimitHits || 0) + 1;
+        const waitMin = Math.min(30 * Math.pow(2, health.rateLimitHits - 1), 180);
+        reconcileBackoffUntil = Date.now() + waitMin * 60 * 1000;
+        // เตือนไม่เกิน 1 ครั้ง/2 ชม. (เดิมเตือนทุกครั้งที่โดน = สแปม)
+        if (Date.now() - (health.lastRateAlert || 0) > 2 * 3600000) {
+          health.lastRateAlert = Date.now();
+          await logError('warn', 'RATE_LIMITED', symbol,
+            `โดน rate limit ครั้งที่ ${health.rateLimitHits} — พัก reconcile ${waitMin} นาที`);
+        }
         return;
       }
       await logError('warn', 'RECONCILE_FAIL', symbol, `เช็ค position ไม่ได้ (ข้ามรอบนี้): ${e.message}`);
@@ -391,16 +399,19 @@ async function reconcile() {
       }
       if (confirm) continue;   // ครั้งที่ 2 เจอ = false alarm ข้ามไป
 
-      // ยืนยันแล้วว่าไม่มีจริง → น่าจะโดน SL ปิด ปิดในระบบให้ตรงกัน
-      health.desyncAlerts++;
+      // ยืนยันแล้วว่าไม่มีจริง → SL บน exchange ปิดไม้ให้ = พฤติกรรมปกติ
+      // ไม่นับเป็น desync (ตัวนับนี้ไว้จับ "ข้อมูลไม่ตรงกันจริง" เท่านั้น)
+      health.slClosedCount = (health.slClosedCount || 0) + 1;
       const closePx = await (async () => {
         try {
           const kl = await fetchKlines(symbol, 2);
           return Array.isArray(kl) && kl.length ? +kl[kl.length - 1][4] : botPos.sl;
         } catch { return botPos.sl; }
       })();
-      await logError('critical', 'POSITION_CLOSED_ON_EXCHANGE', symbol,
-        `Binance ไม่มี position แล้ว (ยืนยัน 2 ครั้ง) — น่าจะโดน SL ปิด บันทึกเป็น trade ที่ราคา $${f(closePx)}`,
+      // SL ทำงานบน exchange = พฤติกรรมปกติ ไม่ใช่ปัญหาร้ายแรง
+      // (critical ไว้ใช้กับเรื่องที่ต้องลงมือแก้จริงๆ เท่านั้น)
+      await logError('info', 'POSITION_CLOSED_ON_EXCHANGE', symbol,
+        `SL บน Binance ปิดไม้ให้แล้ว — บันทึกเป็น trade ที่ราคา $${f(closePx)}`,
         { botDir: botPos.dir, botQty: botPos.qty, botEntry: botPos.entry, botSL: botPos.sl });
       await closePosition(symbol, closePx, 'SL_FILLED_EXCHANGE');
       positions[symbol] = null;   // ยืนยันล้างแน่นอน (exchange ปิดไปแล้ว)
@@ -410,7 +421,7 @@ async function reconcile() {
     // ทั้งคู่ FLAT แต่มี SL ค้าง → ลบทิ้ง (ถ้า trigger จะเปิดไม้ที่ไม่มีใครสั่ง!)
     else if (!botPos && !exPos && live.getOpenStops && live.sweepStops) {
       try {
-        const stray = (await live.getOpenStops(symbol)).filter(o => o.symbol === symbol);
+        const stray = (await live.getOpenStops(symbol, 120000)).filter(o => o.symbol === symbol);
         if (stray.length) {
           const r = await live.sweepStops(symbol, null);
           await logError('warn', 'STRAY_STOP_CLEANED', symbol,
@@ -435,9 +446,24 @@ async function reconcile() {
     else if (botPos && exPos) {
       if (live.getOpenStops) {
         try {
-          const stops = (await live.getOpenStops(symbol)).filter(o => o.symbol === symbol);
+          const stops = (await live.getOpenStops(symbol, 120000)).filter(o => o.symbol === symbol);
           if (!stops.length) {
-            // SL หายไป (โดนลบ/หมดอายุ/restart) → วางกลับทันที
+            // ยืนยันซ้ำแบบไม่ใช้ cache — rate limit/สะดุดอาจทำให้ query แรกได้ [] ผิดๆ
+            // ถ้าไม่เช็ค จะวาง SL ซ้ำแล้วต้องมาลบทีหลัง (วนลูปกิน API)
+            await new Promise(r => setTimeout(r, 2500));
+            let confirmStops = [];
+            try { confirmStops = (await live.getOpenStops(symbol, 0)).filter(o => o.symbol === symbol); }
+            catch (e) {
+              await logError('warn', 'SL_CHECK_FAIL', symbol,
+                `ยืนยันครั้งที่ 2 ไม่ได้ — ข้ามรอบนี้ ไม่วาง SL ซ้ำ (${e.message.slice(0,60)})`);
+              continue;
+            }
+            if (confirmStops.length) {
+              botPos.slPlaced = true;
+              botPos.stopOrderId = confirmStops[0].id;
+              continue;   // SL มีอยู่จริง — query แรกผิดพลาด
+            }
+            // SL หายจริง → วางกลับ
             const stopSide = botPos.dir === 'long' ? 'SELL' : 'BUY';
             const r = await live.placeStopOrder(symbol, stopSide, botPos.qty, botPos.sl);
             if (r && !r.error) {
@@ -718,7 +744,7 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
   // ── เช็คว่ามี margin พอจริงบน exchange (กัน error -2019 Margin insufficient) ──
   if (live.isEnabled() && live.testConnection) {
     try {
-      const conn = await live.testConnection();
+      const conn = await live.testConnection(5 * 60 * 1000);   // cache 5 นาที ลด API call
       if (conn.ok) {
         const marginNeeded = notionalCheck / LEVERAGE;
         if (conn.available < marginNeeded * 1.1) {   // เผื่อ 10% สำหรับ fee
@@ -1282,7 +1308,8 @@ async function pollTelegram() {
           `เปิดไม้ไม่ผ่าน: ${health.orderErrors}\n` +
           `ปิดไม้ไม่ออก: ${health.closeErrors}\n` +
           `วาง SL ไม่ผ่าน: ${health.slErrors}\n` +
-          `ข้อมูลไม่ตรงกัน: ${health.desyncAlerts}\n\n` +
+          `ข้อมูลไม่ตรงกัน: ${health.desyncAlerts}\n` +
+          `SL ปิดไม้ให้ (ปกติ): ${health.slClosedCount || 0}\n\n` +
           `error 24 ชม.: ${last24.length} (ร้ายแรง ${crit.length})\n` +
           (health.lastError ? `\nล่าสุด: ${health.lastError.kind}\n${health.lastError.tsLocal}\n${health.lastError.message.slice(0,120)}` : '\nยังไม่มี error ✅'));
       } else if (text === '/analyze' || text === '/วิเคราะห์' || text === '/a') {
@@ -1569,6 +1596,7 @@ function buildDashboardData() {
       closeErrors: health.closeErrors,
       slErrors: health.slErrors,
       desyncAlerts: health.desyncAlerts,
+      slClosedByExchange: health.slClosedCount || 0,
       lastError: health.lastError ? { kind: health.lastError.kind, ts: health.lastError.tsLocal, severity: health.lastError.severity } : null
     },
     version: BOT_VERSION,
@@ -1749,7 +1777,7 @@ tg(`🐢 <b>Turtle Pro ${BOT_VERSION} เริ่มทำงาน</b>\n\n` +
 
 // ตรวจความตรงกันกับ Binance ทุก 15 นาที
 if (live.isEnabled()) {
-  setTimeout(() => { reconcile(); setInterval(reconcile, 10 * 60 * 1000); }, 30000);   // ทุก 10 นาที (ถี่กว่านี้โดน rate limit -1003)
+  setTimeout(() => { reconcile(); setInterval(reconcile, 20 * 60 * 1000); }, 60000);   // ทุก 20 นาที — SL อยู่บน exchange แล้ว ไม่ต้องเช็คถี่ (rate limit)
 }
 
 // loop ทุก 1 นาที — เช็คทุกตลาด
