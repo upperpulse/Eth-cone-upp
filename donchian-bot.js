@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v5.0';
+const BOT_VERSION = 'v5.2';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -252,24 +252,30 @@ function buildPositionReport(symbol, price) {
   const cfg = MARKETS[symbol];
   if (!position) return `📍 ${cfg.label} FLAT — รอ signal (break D${cfg.entryPeriod})`;
   const { dir, entry, sl, peak, qty, entryTs } = position;
-  const floatPnl = dir === 'long' ? (price - entry) * qty : (entry - price) * qty;
+  // ใช้ราคา fill จริงเป็นฐานทุกการคำนวณ (ไม่งั้นกำไรลอยกับ BE คิดคนละฐาน)
+  const base = position.liveEntryFill ?? entry;
+  const floatPnl = dir === 'long' ? (price - base) * qty : (base - price) * qty;
   const heldH = Math.round((Date.now() - entryTs) / 3600000);
   const slDist = Math.abs(price - sl);
-  const locked = dir === 'long' ? (sl > entry) : (sl < entry);
-  const lockedGross = dir === 'long' ? (sl - entry) * qty : (entry - sl) * qty;
-  const lockedNet = lockedGross - (entry + sl) * qty * (FEE + SLIP);
+  const locked = dir === 'long' ? (sl > base) : (sl < base);
+  const lockedGross = dir === 'long' ? (sl - base) * qty : (base - sl) * qty;
+  const lockedNet = lockedGross - (base + sl) * qty * (FEE + SLIP);
   const emoji = floatPnl >= 0 ? '🟢' : '🔴';
   const curR = position.riskAmt > 0 ? floatPnl / position.riskAmt : 0;
   let beLine = '';
   if (cfg.breakevenAtR > 0) {
-    if (position.beDone) beLine = `🛡 ล็อกทุนแล้ว (ไม่ขาดทุนแน่นอน)\n`;
+    if (position.beDone) {
+      beLine = lockedNet > 0.01
+        ? `🛡 SL เลยจุดเข้าแล้ว — ปิดตอนนี้ได้อย่างน้อย $${f(lockedNet)}\n`
+        : `🛡 ล็อกทุนแล้ว — SL อยู่ที่จุดเข้า ปิดแล้วได้ ~$0\n   (ไม่ใช่กำไรลอย $${f(floatPnl)} ที่เห็น)\n`;
+    }
     else if (curR > 0) beLine = `🛡 ล็อกทุนที่ +${cfg.breakevenAtR}R (ตอนนี้ ${curR.toFixed(2)}R)\n`;
   }
   return `${emoji} <b>${cfg.label} ${dir.toUpperCase()} กำลังถือ</b>\n\n` +
-    `Entry $${f(entry)} → ตอนนี้ $${f(price)}\n` +
+    `Entry $${f(base)}${position.liveEntryFill != null && Math.abs(base - entry) > 0.0001 ? ` <i>(สัญญาณ $${f(entry)})</i>` : ''} → ตอนนี้ $${f(price)}\n` +
     `กำไรลอย: $${f(floatPnl)} ${floatPnl>=0?'✅':''}\n` +
     `ถือ: ${heldH}h | peak $${f(peak)}\n` +
-    `SL $${f(sl)} (ห่าง $${f(slDist)}) ${locked ? `🔒 ล็อกกำไรขั้นต่ำ $${f(lockedNet)}` : ''}\n` +
+    `SL $${f(sl)} (ห่าง $${f(slDist)})\n` +
     beLine +
     `Equity รวม $${f(accountEquity)}`;
 }
@@ -529,7 +535,9 @@ async function checkSignal(symbol) {
   let kl;
   const need = Math.max(cfg.entryPeriod, cfg.exitPeriod) + cfg.atrPeriod + 5;
   try {
-    kl = await fetchKlines(symbol, Math.max(need, 110));
+    // ต้อง >= 201 แท่งเพื่อคำนวณ Efficiency Ratio (regime tag)
+    // ก่อนหน้านี้ดึง 110 → ER เป็น null ทุกไม้ วิเคราะห์ sideways/trend ไม่ได้เลย
+    kl = await fetchKlines(symbol, Math.max(need, 210));
   } catch (e) {
     health.apiFailStreak++;
     const mins = Math.round((Date.now() - health.lastApiOk) / 60000);
@@ -1064,11 +1072,20 @@ async function closePosition(symbol, exit, reason) {
   const win = pnl > 0;
   const emoji = win ? '🟢' : '🔴';
   const openCount = SYMBOLS.filter(sy => positions[sy] && sy !== symbol).length;
+  // แสดงราคา fill จริงถ้ามี (ไม่งั้น PnL จะดูขัดกับราคาที่แสดง)
+  const showEntry = realEntry, showExit = realExit;
+  const usedFill = (position.liveEntryFill != null) || (exitFill != null);
   await tg(`${emoji} <b>${cfg.label} EXIT — ${reason}</b>\n\n` +
-    `${dir.toUpperCase()} $${f(entry)} → $${f(exit)}\n` +
+    `${dir.toUpperCase()} $${f(showEntry)} → $${f(showExit)}` +
+    (usedFill ? ` <i>(fill จริง)</i>` : '') + `\n` +
+    (usedFill ? `สัญญาณ: $${f(entry)} → $${f(exit)}\n` : '') +
     `PnL: $${f(pnl)} (${rMultiple > 0 ? '+' : ''}${rMultiple.toFixed(2)}R) ${win ? '✅' : ''}\n` +
     `ถือ: ${holdH} ชม. | MFE $${f(mfe)} MAE $${f(mae)}\n` +
     `📊 TP+2R shadow: ${tp2Hit ? `เก็บ $${f(tp2Pnl)} (${tp2Diff>=0?'+':''}$${f(tp2Diff)} vs trail)` : 'ไม่ถึง +2R (เท่า trail)'}\n` +
+    ((feeReal != null || fundingLive != null)
+      ? `💸 fee $${feeReal != null ? f(feeReal) : '—'}` +
+        (fundingLive != null ? ` | funding ${fundingLive >= 0 ? '+' : ''}$${f(fundingLive)}${fundingLive >= 0 ? ' (ได้รับ)' : ''}` : '') + `\n`
+      : '') +
     `Equity: $${f(accountEquity)} (peak $${f(peakEquity)})` +
     (openCount ? `\nยังเปิดอยู่ ${openCount} ตลาด` : ''));
   console.log(`<<< ${cfg.label} EXIT ${reason} pnl $${f(pnl)} (${rMultiple.toFixed(2)}R) equity $${f(accountEquity)}`);
