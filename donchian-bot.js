@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v5.2';
+const BOT_VERSION = 'v5.3';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -710,7 +710,7 @@ async function checkSignal(symbol) {
 
 async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
   const cfg = MARKETS[symbol];
-  const sl = dir === 'long' ? entry - atr * cfg.trailATR : entry + atr * cfg.trailATR;
+  let sl = dir === 'long' ? entry - atr * cfg.trailATR : entry + atr * cfg.trailATR;
   // ── ตรวจ SL สมเหตุผลก่อนใช้ (ข้อมูลเพี้ยนทำให้ SL ติดลบได้) ──
   if (!isFinite(sl) || sl <= 0) {
     await logError('critical', 'INVALID_SL', symbol,
@@ -755,11 +755,27 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
       const conn = await live.testConnection(5 * 60 * 1000);   // cache 5 นาที ลด API call
       if (conn.ok) {
         const marginNeeded = notionalCheck / LEVERAGE;
-        if (conn.available < marginNeeded * 1.1) {   // เผื่อ 10% สำหรับ fee
-          await logError('critical', 'INSUFFICIENT_MARGIN', symbol,
-            `margin ไม่พอ — ต้องใช้ $${f(marginNeeded)} มีจริง $${f(conn.available)} — ข้ามไม้นี้`,
-            { needed: +marginNeeded.toFixed(2), available: conn.available });
-          return;
+        const usable = conn.available / 1.1;                    // เผื่อ 10% สำหรับ fee
+        if (usable < marginNeeded) {
+          // ── ลดขนาดให้พอดีกับ margin ที่มี แทนที่จะข้ามไม้ ──
+          // trend-following พลาดไม้ใหญ่ 1 ตัว = เสียหายกว่าเข้าไม้เล็ก
+          const maxNotional = usable * LEVERAGE;
+          const scaled = maxNotional / entry;
+          const step = Math.pow(10, cfg.qtyPrecision ?? 3);
+          const newQty = Math.floor(scaled * step) / step;
+          const ratio = newQty / qty;
+          if (newQty <= 0 || ratio < 0.25) {
+            await logError('warn', 'MARGIN_TOO_LOW', symbol,
+              `margin เหลือน้อยเกิน — ต้องใช้ $${f(marginNeeded)} มี $${f(conn.available)} ` +
+              `(ลดได้แค่ ${(ratio*100).toFixed(0)}% ของขนาดที่ควรเป็น) — ข้ามไม้นี้`,
+              { needed: +marginNeeded.toFixed(2), available: conn.available, ratio: +ratio.toFixed(3) });
+            return;
+          }
+          await logError('warn', 'SIZE_REDUCED_MARGIN', symbol,
+            `margin จำกัด — ลดขนาดจาก ${qty} เหลือ ${newQty} (${(ratio*100).toFixed(0)}%) ` +
+            `risk ${(RISK_PER_TRADE*100*ratio).toFixed(3)}% แทน ${(RISK_PER_TRADE*100).toFixed(2)}%`,
+            { orderedQty: qty, reducedQty: newQty, available: conn.available });
+          qty = newQty;   // SL คงเดิม (ATR ไม่เปลี่ยน) — risk ลดตาม qty ที่ลดลง
         }
       }
     } catch (e) { await logError('warn', 'MARGIN_CHECK_FAIL', symbol, e.message); }
@@ -993,7 +1009,8 @@ async function closePosition(symbol, exit, reason) {
   // ถ้าไม่มี (paper / ดึงไม่ได้) ค่อยใช้ค่าประมาณ
   const usingLivePnl = live.isEnabled() && liveRealizedPnl != null;
   const pnl = usingLivePnl ? (liveRealizedPnl - (position.entryFeeLive || 0)) : pnlEstimate;
-  if (usingLivePnl && Math.abs(pnl - pnlEstimate) > Math.max(1, Math.abs(pnlEstimate) * 0.15)) {
+  // เตือนเมื่อต่างทั้งเป็น % และเป็นจำนวนเงินที่มีนัยสำคัญ (ไม่งั้นเตือนทุกไม้)
+  if (usingLivePnl && Math.abs(pnl - pnlEstimate) > 5 && Math.abs(pnl - pnlEstimate) > Math.abs(pnlEstimate) * 0.20) {
     await logError('warn', 'PNL_MISMATCH', symbol,
       `PnL จริงจาก Binance $${pnl.toFixed(2)} ต่างจากที่คำนวณเอง $${pnlEstimate.toFixed(2)} — ใช้ค่าจริง`,
       { live: +pnl.toFixed(4), estimate: +pnlEstimate.toFixed(4),
