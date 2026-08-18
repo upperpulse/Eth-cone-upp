@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v5.4';
+const BOT_VERSION = 'v5.5';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -146,6 +146,11 @@ const health = {
   closeErrors: 0,          // ปิดไม่ออก (สะสม)
   slErrors: 0,             // วาง SL ไม่ผ่าน
   desyncAlerts: 0,         // bot กับ exchange ไม่ตรงกัน
+  rateLimitHits: 0,        // โดน rate limit สะสม (reset เมื่อ API ปกติ)
+  rateLimitTotal: 0,       // นับรวมไม่รีเซ็ต — ดูแนวโน้มระยะยาว
+  lastRateLimitAt: null,   // ครั้งล่าสุดเมื่อไหร่
+  backoffUntil: 0,         // พัก reconcile ถึงเมื่อไหร่
+  slClosedCount: 0,
   lastError: null,
   alerted: {}              // กันสแปม: เตือนเรื่องเดิมซ้ำ
 };
@@ -326,50 +331,47 @@ async function reconcile() {
 
 
   // ── ตรวจ equity บอท vs balance จริง (ตัวเลขเพี้ยน = risk sizing ผิดทุกไม้) ──
+  // แยกเป็นบล็อกของตัวเอง — ห้าม return ออกจาก reconcile เพราะยังต้องตรวจ position/SL ต่อ
   if (live.testConnection) {
     try {
       const conn = await live.testConnection(5 * 60 * 1000);   // cache 5 นาที ลด API call
       if (conn.ok && conn.balance > 0) {
         const flat = SYMBOLS.every(s2 => !positions[s2]);
-        // ตอนถือ position: balance บน exchange รวมกำไรลอยแล้ว ต้องหักออกก่อนเทียบ
-        let floatPnl = 0;
+        let floatPnl = 0, known = true;
         for (const s2 of SYMBOLS) {
           const p2 = positions[s2];
           if (!p2) continue;
           const px = dashCache[s2]?.price;
-          if (!px) { floatPnl = null; break; }
+          if (!px) { known = false; break; }
           floatPnl += p2.dir === 'long' ? (px - p2.entry) * p2.qty : (p2.entry - px) * p2.qty;
         }
-        if (floatPnl === null) return;   // ไม่รู้ราคาปัจจุบัน → ข้ามการเทียบรอบนี้
-        // balance บน exchange รวมกำไรลอย → หักออกก่อนเทียบกับ equity ที่ bot จด (realized เท่านั้น)
-        const exchangeRealized = conn.balance - floatPnl;
-        const drift = exchangeRealized - accountEquity;
-        const driftPct = Math.abs(drift) / conn.balance * 100;
-        // 0.5% ต่ำเกิน — fee/funding ที่ยังไม่ settle ทำให้ต่างเล็กน้อยเป็นปกติ
-        // ใช้ 1.5% (≈ $70 จาก $4,700) และเตือนซ้ำไม่เกิน 1 ครั้ง/ชม.
-        const now = Date.now();
-        if (driftPct > 1.5 && now - (health.lastDriftAlert || 0) > 3600000) {
-          health.lastDriftAlert = now;
-          await logError(driftPct > 4 ? 'critical' : 'warn', 'EQUITY_DRIFT', null,
-            `equity bot $${f(accountEquity)} vs exchange(realized) $${f(exchangeRealized)} — ต่าง $${f(drift)} (${driftPct.toFixed(2)}%)` +
-            (floatPnl ? ` [balance $${f(conn.balance)} − กำไรลอย $${f(floatPnl)}]` : ''),
-            { bot: +accountEquity.toFixed(2), exchangeBalance: conn.balance,
-              floatPnl: +floatPnl.toFixed(2), exchangeRealized: +exchangeRealized.toFixed(2),
-              drift: +drift.toFixed(2), driftPct: +driftPct.toFixed(3) });
-          // FLAT อยู่ = ปลอดภัยที่จะ sync ให้ตรง (ไม่มี position ค้างให้คำนวณผิด)
-          if (flat) {
-            const old = accountEquity;
-            accountEquity = conn.balance;
-            if (accountEquity > peakEquity) peakEquity = accountEquity;
-            saveState();
-            await tg(`🔄 <b>ปรับ equity ให้ตรง Binance</b>\n$${f(old)} → $${f(conn.balance)}\n(ต่าง $${f(drift)} จาก fee/funding สะสม)`);
+        // ไม่รู้ราคาปัจจุบัน → ข้ามเฉพาะการเทียบ equity (ไม่ข้ามการตรวจ position/SL)
+        if (known) {
+          const exchangeRealized = conn.balance - floatPnl;
+          const drift = exchangeRealized - accountEquity;
+          const driftPct = Math.abs(drift) / conn.balance * 100;
+          const now = Date.now();
+          if (driftPct > 1.5 && now - (health.lastDriftAlert || 0) > 3600000) {
+            health.lastDriftAlert = now;
+            await logError(driftPct > 4 ? 'critical' : 'warn', 'EQUITY_DRIFT', null,
+              `equity bot $${f(accountEquity)} vs exchange(realized) $${f(exchangeRealized)} — ต่าง $${f(drift)} (${driftPct.toFixed(2)}%)` +
+              (floatPnl ? ` [balance $${f(conn.balance)} − กำไรลอย $${f(floatPnl)}]` : ''),
+              { bot: +accountEquity.toFixed(2), exchangeBalance: conn.balance,
+                floatPnl: +floatPnl.toFixed(2), exchangeRealized: +exchangeRealized.toFixed(2),
+                drift: +drift.toFixed(2), driftPct: +driftPct.toFixed(3) });
+            if (flat) {
+              const old = accountEquity;
+              accountEquity = conn.balance;
+              if (accountEquity > peakEquity) peakEquity = accountEquity;
+              saveState();
+              await tg(`🔄 <b>ปรับ equity ให้ตรง Binance</b>\n$${f(old)} → $${f(conn.balance)}\n(ต่าง $${f(drift)} จาก fee/funding สะสม)`);
+            }
           }
         }
-        health.lastBalance = conn.balance;
-        health.lastAvailable = conn.available;
       }
-    } catch (e) { await logError('warn', 'API_CHECK_FAIL', null, e.message); }
+    } catch (e) { /* เช็คไม่ได้ = ข้ามการเทียบ equity แต่ยังตรวจ position ต่อ */ }
   }
+
   for (const symbol of SYMBOLS) {
     let exPos;
     try { exPos = await live.getPositionLive(symbol); }
@@ -378,10 +380,20 @@ async function reconcile() {
       if (/-1003|too many request|banned/i.test(e.message)) {
         // โดนซ้ำ → พักนานขึ้นเรื่อยๆ (30 → 60 → 120 นาที สูงสุด 3 ชม.)
         health.rateLimitHits = (health.rateLimitHits || 0) + 1;
+        health.rateLimitTotal = (health.rateLimitTotal || 0) + 1;
+        health.lastRateLimitAt = Date.now();
         const waitMin = Math.min(30 * Math.pow(2, health.rateLimitHits - 1), 180);
         reconcileBackoffUntil = Date.now() + waitMin * 60 * 1000;
+        health.backoffUntil = reconcileBackoffUntil;
         // เตือนไม่เกิน 1 ครั้ง/2 ชม. (เดิมเตือนทุกครั้งที่โดน = สแปม)
-        if (Date.now() - (health.lastRateAlert || 0) > 2 * 3600000) {
+        // โดนติดกัน 3+ ครั้ง = เรียก API เกินจริง ต้องรู้ทันที (ไม่ใช่แค่ warn)
+        if (health.rateLimitHits >= 3 && Date.now() - (health.lastRateAlert || 0) > 3600000) {
+          health.lastRateAlert = Date.now();
+          await logError('critical', 'RATE_LIMIT_SEVERE', symbol,
+            `โดน rate limit ${health.rateLimitHits} ครั้งติด — พัก ${waitMin} นาที\n` +
+            `บอทเช็คสถานะกับ Binance ไม่ได้ระหว่างนี้ (SL บน exchange ยังคุ้มครองอยู่)`,
+            { hits: health.rateLimitHits, total: health.rateLimitTotal, waitMin });
+        } else if (Date.now() - (health.lastRateAlert || 0) > 2 * 3600000) {
           health.lastRateAlert = Date.now();
           await logError('warn', 'RATE_LIMITED', symbol,
             `โดน rate limit ครั้งที่ ${health.rateLimitHits} — พัก reconcile ${waitMin} นาที`);
@@ -1343,6 +1355,10 @@ async function pollTelegram() {
           `ปิดไม้ไม่ออก: ${health.closeErrors}\n` +
           `วาง SL ไม่ผ่าน: ${health.slErrors}\n` +
           `ข้อมูลไม่ตรงกัน: ${health.desyncAlerts}\n` +
+          `โดน rate limit: ${health.rateLimitTotal || 0} ครั้ง` +
+          (Date.now() < (health.backoffUntil || 0)
+            ? ` 🟡 กำลังพัก ${Math.ceil((health.backoffUntil - Date.now())/60000)} นาที`
+            : (health.lastRateLimitAt ? ` (ล่าสุด ${Math.round((Date.now()-health.lastRateLimitAt)/60000)} นาทีก่อน)` : '')) + `\n` +
           `SL ปิดไม้ให้ (ปกติ): ${health.slClosedCount || 0}\n\n` +
           `error 24 ชม.: ${last24.length} (ร้ายแรง ${crit.length})\n` +
           (health.lastError ? `\nล่าสุด: ${health.lastError.kind}\n${health.lastError.tsLocal}\n${health.lastError.message.slice(0,120)}` : '\nยังไม่มี error ✅'));
@@ -1623,7 +1639,8 @@ function buildDashboardData() {
     mode: live.modeLabel(),
     liveEnabled: live.isEnabled(),
     health: {
-      ok: health.apiFailStreak === 0 && health.closeErrors === 0 && health.desyncAlerts === 0,
+      ok: health.apiFailStreak === 0 && health.closeErrors === 0 && health.desyncAlerts === 0
+        && Date.now() >= (health.backoffUntil || 0),
       apiFailStreak: health.apiFailStreak,
       minsSinceData: Math.round((Date.now() - health.lastApiOk) / 60000),
       orderErrors: health.orderErrors,
@@ -1631,6 +1648,11 @@ function buildDashboardData() {
       slErrors: health.slErrors,
       desyncAlerts: health.desyncAlerts,
       slClosedByExchange: health.slClosedCount || 0,
+      rateLimitHits: health.rateLimitHits || 0,
+      rateLimitTotal: health.rateLimitTotal || 0,
+      rateLimitedNow: Date.now() < (health.backoffUntil || 0),
+      backoffMinsLeft: Date.now() < (health.backoffUntil || 0)
+        ? Math.ceil((health.backoffUntil - Date.now()) / 60000) : 0,
       lastError: health.lastError ? { kind: health.lastError.kind, ts: health.lastError.tsLocal, severity: health.lastError.severity } : null
     },
     version: BOT_VERSION,
@@ -1733,6 +1755,23 @@ http.createServer((req, res) => {
   res.writeHead(404); res.end();
 }).listen(PORT, () => console.log(`ETH Turtle Pro server :${PORT} (/health /dashboard)`));
 
+// ── กัน process ตายจาก error ที่ไม่ได้จับ ──
+// บอทมี position เปิดอยู่ ถ้าตายกลางทาง = ไม่มีใคร trail/ปิด
+// (PM2 restart ให้ แต่ระหว่างนั้นมองไม่เห็นตลาด)
+process.on('unhandledRejection', async (reason) => {
+  const msg = reason && reason.message ? reason.message : String(reason);
+  console.error('🔴 unhandledRejection:', msg);
+  try { await logError('critical', 'UNHANDLED_REJECTION', null, `error ที่ไม่ได้จับ: ${msg.slice(0, 200)}`); } catch (e) {}
+});
+process.on('uncaughtException', async (err) => {
+  console.error('🔴 uncaughtException:', err && err.message);
+  try {
+    await logError('critical', 'UNCAUGHT_EXCEPTION', null, `error ร้ายแรง: ${(err && err.message || '').slice(0, 200)}`);
+    saveState();
+  } catch (e) {}
+  // ไม่ exit — ปล่อยให้ loop ทำงานต่อ (position ยังต้องมีคนดูแล)
+});
+
 // ═══════════════ STARTUP ═══════════════
 loadState();
 const mktSummary = SYMBOLS.map(s2 => {
@@ -1749,7 +1788,14 @@ if (live.isEnabled()) { live.setLeverage(SYMBOLS); }
 // ── LIVE/TESTNET: sync equity + position จริงจาก Binance ตอนเริ่ม ──
 if (live.isEnabled() && live.testConnection) {
   (async () => {
-    const conn = await live.testConnection();
+    // ห่อ try ทั้งบล็อก — ถ้า throw ตอน start จะเป็น unhandled rejection ทำ process ล้ม
+    let conn;
+    try { conn = await live.testConnection(); }
+    catch (e) {
+      await logError('critical', 'STARTUP_CONNECT_FAIL', null,
+        `เชื่อมต่อ Binance ตอนเริ่มไม่ได้: ${e.message} — บอทยังรันต่อ จะลองใหม่ใน reconcile`);
+      return;
+    }
     if (conn.ok) {
       console.log(`[LIVE] เชื่อมต่อ ${conn.mode || live.modeLabel()} สำเร็จ | balance ${conn.balance} USDT | available ${conn.available}`);
       // sync equity จาก balance จริง (ครั้งแรกเท่านั้น — ถ้า state ยังเป็นค่า default)
