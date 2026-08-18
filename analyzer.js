@@ -216,6 +216,10 @@ function analyze(dir) {
       .forEach(([k, c]) => L.push(`• ${k} ×${c}`));
     if (crit.length) rec.push(`🔴 มี critical ${crit.length} ครั้งใน 24 ชม. — ตรวจ /errors`);
   }
+  // rate limit — ถ้าโดนบ่อยแปลว่าบอทมองไม่เห็นสถานะจริงเป็นช่วงๆ
+  const rl = last24.filter(e => e.kind === 'RATE_LIMITED' || e.kind === 'RATE_LIMIT_SEVERE').length;
+  if (rl >= 5) rec.push(`🔴 โดน rate limit ${rl} ครั้งใน 24 ชม. — บอทเช็คสถานะกับ Binance ไม่ได้เป็นช่วงๆ (พิจารณาลดเหลือ 1 ตลาด)`);
+  else if (rl > 0) rec.push(`⚠️ โดน rate limit ${rl} ครั้ง — ยังรับได้ แต่จับตาไว้`);
   const slFail = trades.filter(t => t.slPlaced === false).length;
   if (slFail) rec.push(`🔴 ${slFail} ไม้ไม่มี SL บน exchange — เสี่ยงถ้าบอทดับ`);
   L.push('');

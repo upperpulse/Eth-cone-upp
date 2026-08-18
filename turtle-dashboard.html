@@ -154,7 +154,22 @@ let activeTab = 'overview';
 
 async function loadLive(){
   try{
-    const r = await fetch(API_URL.replace(/\/$/,'') + '/dashboard', {headers:{'ngrok-skip-browser-warning':'true'}});
+    // token: จาก ?t= ใน URL หรือที่เคยบันทึกไว้
+    const qp = new URLSearchParams(location.search);
+    const tok = qp.get('t') || localStorage.getItem('turtle_token') || '';
+    if (tok) localStorage.setItem('turtle_token', tok);
+
+    const base = API_URL.replace(/\/$/,'');
+    const url = base + '/dashboard' + (tok ? '?t=' + encodeURIComponent(tok) : '');
+    const r = await fetch(url, {headers:{'ngrok-skip-browser-warning':'true','X-Dashboard-Token':tok}});
+
+    if (r.status === 401) {
+      localStorage.removeItem('turtle_token');
+      document.body.innerHTML = '<div style="font-family:-apple-system,sans-serif;text-align:center;padding:60px 20px;color:#3E2F1C">'
+        + '<div style="font-size:44px">🔒</div><h2>ต้องใส่รหัสผ่าน</h2>'
+        + '<p style="color:#6B5544;font-size:14px">เปิดผ่าน <a href="' + base + '/ui" style="color:#B5543A">' + base + '/ui</a></p></div>';
+      return;
+    }
     STATE = await r.json();
     $('footTxt').textContent = 'live · ' + new Date().toLocaleTimeString('th-TH') + ' · ' + (STATE.version||'');
     render();
@@ -194,6 +209,8 @@ function renderHealth(){
     if(h.orderErrors>0) bits.push(`เปิดไม้ไม่ผ่าน ${h.orderErrors}`);
     if(h.slErrors>0) bits.push(`SL ไม่ผ่าน ${h.slErrors}`);
     if(h.desyncAlerts>0) bits.push(`ข้อมูลไม่ตรง ${h.desyncAlerts}`);
+    if(h.rateLimitedNow) bits.push(`🟡 rate limit — พัก ${h.backoffMinsLeft} นาที`);
+    else if(h.rateLimitTotal>4) bits.push(`rate limit ${h.rateLimitTotal} ครั้ง`);
     el.innerHTML = `<div class="health-bar bad">🔴 ${bits.join(' · ')||'มีปัญหา'}</div>`;
   }
 }
