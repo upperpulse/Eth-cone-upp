@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v5.2';
+const BOT_VERSION = 'v5.4';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -368,7 +368,7 @@ async function reconcile() {
         health.lastBalance = conn.balance;
         health.lastAvailable = conn.available;
       }
-    } catch (e) { await logError('warn', 'BALANCE_CHECK_FAIL', null, e.message); }
+    } catch (e) { await logError('warn', 'API_CHECK_FAIL', null, e.message); }
   }
   for (const symbol of SYMBOLS) {
     let exPos;
@@ -434,7 +434,7 @@ async function reconcile() {
             `FLAT แล้วแต่มี SL ค้าง ${stray.length} อัน — ลบทิ้ง ${r.removed} อัน (ถ้า trigger จะเปิดไม้ที่ไม่ได้สั่ง)`);
           await tg(`🧹 <b>${cfg.label}: ลบ SL ตกค้าง</b>\nไม่มี position แล้วแต่มี SL ค้าง ${stray.length} อัน — ลบทิ้งแล้ว`);
         }
-      } catch (e) { await logError('warn', 'STRAY_CHECK_FAIL', symbol, e.message); }
+      } catch (e) { await logError('warn', 'API_CHECK_FAIL', symbol, e.message); }
     }
     // exchange มี แต่ bot ไม่มี = position ตกค้าง ไม่มีใครดูแล 🔴
     else if (!botPos && exPos) {
@@ -460,7 +460,7 @@ async function reconcile() {
             let confirmStops = [];
             try { confirmStops = (await live.getOpenStops(symbol, 0)).filter(o => o.symbol === symbol); }
             catch (e) {
-              await logError('warn', 'SL_CHECK_FAIL', symbol,
+              await logError('warn', 'API_CHECK_FAIL', symbol,
                 `ยืนยันครั้งที่ 2 ไม่ได้ — ข้ามรอบนี้ ไม่วาง SL ซ้ำ (${e.message.slice(0,60)})`);
               continue;
             }
@@ -501,7 +501,7 @@ async function reconcile() {
                 `SL บน exchange ($${stops[0].stopPrice}) ต่างจาก bot ($${f(botPos.sl)}) — sync ใหม่แล้ว`);
             }
           }
-        } catch (e) { await logError('warn', 'SL_CHECK_FAIL', symbol, e.message); }
+        } catch (e) { await logError('warn', 'API_CHECK_FAIL', symbol, e.message); }
       }
       const dirMismatch = botPos.dir !== exPos.dir;
       const qtyDiff = Math.abs(botPos.qty - exPos.qty) / Math.max(botPos.qty, 0.0001);
@@ -535,8 +535,8 @@ async function checkSignal(symbol) {
   let kl;
   const need = Math.max(cfg.entryPeriod, cfg.exitPeriod) + cfg.atrPeriod + 5;
   try {
-    // ต้อง >= 201 แท่งเพื่อคำนวณ Efficiency Ratio (regime tag)
-    // ก่อนหน้านี้ดึง 110 → ER เป็น null ทุกไม้ วิเคราะห์ sideways/trend ไม่ได้เลย
+    // ดึง klines ตรงจาก Binance ทุกรอบ — เชื่อถือได้กว่าการประกอบเอง
+    // (เคยลอง cache แท่งปิด + ต่อราคาปัจจุบัน แต่ทำ Donchian คลาดเคลื่อน จึงถอนออก)
     kl = await fetchKlines(symbol, Math.max(need, 210));
   } catch (e) {
     health.apiFailStreak++;
@@ -547,7 +547,7 @@ async function checkSignal(symbol) {
         `ดึงราคาไม่ได้ ${health.apiFailStreak} ครั้งติด (ไม่ได้ข้อมูลมา ${mins} นาที) — บอทมองไม่เห็นตลาด`,
         { error: e.message, streak: health.apiFailStreak });
     } else {
-      await logError('warn', 'API_ERROR', symbol, e.message, { streak: health.apiFailStreak });
+      await logError('warn', 'API_FAIL', symbol, e.message, { streak: health.apiFailStreak });
     }
     return;
   }
@@ -566,13 +566,13 @@ async function checkSignal(symbol) {
   // ── ตรวจคุณภาพข้อมูลก่อนใช้ — ราคาเสีย 1 แท่งทำให้ Donchian/ATR เพี้ยนทั้งชุด ──
   const badBars = cls.filter(c => !isFinite(c) || c <= 0).length;
   if (badBars > 0) {
-    await logError('warn', 'BAD_PRICE_DATA', symbol,
+    await logError('warn', 'BAD_DATA', symbol,
       `พบราคาที่ใช้ไม่ได้ ${badBars}/${cls.length} แท่ง — ข้ามรอบนี้ (กันคำนวณ SL/ATR เพี้ยน)`);
     return;
   }
   const price = cls[cls.length - 1];
   if (!isFinite(price) || price <= 0) {
-    await logError('warn', 'BAD_PRICE', symbol, `ราคาปัจจุบันใช้ไม่ได้: ${price}`);
+    await logError('warn', 'BAD_DATA', symbol, `ราคาปัจจุบันใช้ไม่ได้: ${price}`);
     return;
   }
   const atr = calcATR(kl, cfg.atrPeriod);
@@ -710,7 +710,7 @@ async function checkSignal(symbol) {
 
 async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
   const cfg = MARKETS[symbol];
-  const sl = dir === 'long' ? entry - atr * cfg.trailATR : entry + atr * cfg.trailATR;
+  let sl = dir === 'long' ? entry - atr * cfg.trailATR : entry + atr * cfg.trailATR;
   // ── ตรวจ SL สมเหตุผลก่อนใช้ (ข้อมูลเพี้ยนทำให้ SL ติดลบได้) ──
   if (!isFinite(sl) || sl <= 0) {
     await logError('critical', 'INVALID_SL', symbol,
@@ -755,14 +755,30 @@ async function openPosition(symbol, dir, entry, atr, kl, entryHigh, entryLow) {
       const conn = await live.testConnection(5 * 60 * 1000);   // cache 5 นาที ลด API call
       if (conn.ok) {
         const marginNeeded = notionalCheck / LEVERAGE;
-        if (conn.available < marginNeeded * 1.1) {   // เผื่อ 10% สำหรับ fee
-          await logError('critical', 'INSUFFICIENT_MARGIN', symbol,
-            `margin ไม่พอ — ต้องใช้ $${f(marginNeeded)} มีจริง $${f(conn.available)} — ข้ามไม้นี้`,
-            { needed: +marginNeeded.toFixed(2), available: conn.available });
-          return;
+        const usable = conn.available / 1.1;                    // เผื่อ 10% สำหรับ fee
+        if (usable < marginNeeded) {
+          // ── ลดขนาดให้พอดีกับ margin ที่มี แทนที่จะข้ามไม้ ──
+          // trend-following พลาดไม้ใหญ่ 1 ตัว = เสียหายกว่าเข้าไม้เล็ก
+          const maxNotional = usable * LEVERAGE;
+          const scaled = maxNotional / entry;
+          const step = Math.pow(10, cfg.qtyPrecision ?? 3);
+          const newQty = Math.floor(scaled * step) / step;
+          const ratio = newQty / qty;
+          if (newQty <= 0 || ratio < 0.25) {
+            await logError('warn', 'MARGIN_TOO_LOW', symbol,
+              `margin เหลือน้อยเกิน — ต้องใช้ $${f(marginNeeded)} มี $${f(conn.available)} ` +
+              `(ลดได้แค่ ${(ratio*100).toFixed(0)}% ของขนาดที่ควรเป็น) — ข้ามไม้นี้`,
+              { needed: +marginNeeded.toFixed(2), available: conn.available, ratio: +ratio.toFixed(3) });
+            return;
+          }
+          await logError('warn', 'SIZE_REDUCED_MARGIN', symbol,
+            `margin จำกัด — ลดขนาดจาก ${qty} เหลือ ${newQty} (${(ratio*100).toFixed(0)}%) ` +
+            `risk ${(RISK_PER_TRADE*100*ratio).toFixed(3)}% แทน ${(RISK_PER_TRADE*100).toFixed(2)}%`,
+            { orderedQty: qty, reducedQty: newQty, available: conn.available });
+          qty = newQty;   // SL คงเดิม (ATR ไม่เปลี่ยน) — risk ลดตาม qty ที่ลดลง
         }
       }
-    } catch (e) { await logError('warn', 'MARGIN_CHECK_FAIL', symbol, e.message); }
+    } catch (e) { await logError('warn', 'API_CHECK_FAIL', symbol, e.message); }
   }
 
   // ML features ตอน entry
@@ -993,7 +1009,8 @@ async function closePosition(symbol, exit, reason) {
   // ถ้าไม่มี (paper / ดึงไม่ได้) ค่อยใช้ค่าประมาณ
   const usingLivePnl = live.isEnabled() && liveRealizedPnl != null;
   const pnl = usingLivePnl ? (liveRealizedPnl - (position.entryFeeLive || 0)) : pnlEstimate;
-  if (usingLivePnl && Math.abs(pnl - pnlEstimate) > Math.max(1, Math.abs(pnlEstimate) * 0.15)) {
+  // เตือนเมื่อต่างทั้งเป็น % และเป็นจำนวนเงินที่มีนัยสำคัญ (ไม่งั้นเตือนทุกไม้)
+  if (usingLivePnl && Math.abs(pnl - pnlEstimate) > 5 && Math.abs(pnl - pnlEstimate) > Math.abs(pnlEstimate) * 0.20) {
     await logError('warn', 'PNL_MISMATCH', symbol,
       `PnL จริงจาก Binance $${pnl.toFixed(2)} ต่างจากที่คำนวณเอง $${pnlEstimate.toFixed(2)} — ใช้ค่าจริง`,
       { live: +pnl.toFixed(4), estimate: +pnlEstimate.toFixed(4),
@@ -1752,7 +1769,7 @@ if (live.isEnabled() && live.testConnection) {
             positions[sym].stopOrderId = info.orderId;
             positions[sym].slPlaced = true;
             if (info.duplicates > 0) {
-              await logError('warn', 'DUP_STOP_CLEANED', sym,
+              await logError('warn', 'DUP_STOP_SWEPT', sym,
                 `พบ SL ซ้ำ ${info.duplicates} อัน (จาก restart ก่อนหน้า) — ลบทิ้งแล้ว`);
             }
           }
@@ -1770,7 +1787,7 @@ if (live.isEnabled() && live.testConnection) {
       for (const sym of SYMBOLS) {
         let livePos = null;
         try { livePos = await live.getPositionLive(sym); }
-        catch (e) { await logError('warn', 'STARTUP_POS_CHECK_FAIL', sym, e.message); continue; }
+        catch (e) { await logError('warn', 'API_CHECK_FAIL', sym, e.message); continue; }
         if (livePos && !positions[sym]) {
           console.log(`[LIVE] ⚠️ พบ position ${sym} บน Binance แต่ bot ไม่มี record: ${livePos.dir} ${livePos.qty} @ $${livePos.entry}`);
           await tg(`⚠️ <b>${MARKETS[sym].label}: พบ position ค้างบน Binance</b>\n${livePos.dir.toUpperCase()} ${livePos.qty} @ $${livePos.entry}\n\nแนะนำปิดเองใน Binance ก่อน หรือ /close_${MARKETS[sym].label.toLowerCase()}`);

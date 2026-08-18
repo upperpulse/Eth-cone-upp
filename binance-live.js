@@ -76,7 +76,7 @@ async function getFillPrice(symbol, orderId, retries = 4) {
     await new Promise(r => setTimeout(r, 500 * (i + 1)));
     try {
       // limit 1000 — order ใหญ่แตกเป็นสิบๆ ชิ้น ถ้าใช้ 20 จะหาไม่เจอ
-      const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 1000 });
+      const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 500 });
       if (!Array.isArray(trades)) continue;
       const mine = trades.filter(t => String(t.orderId) === String(orderId));
       if (!mine.length) continue;
@@ -108,7 +108,7 @@ async function getFillPrice(symbol, orderId, retries = 4) {
 async function getExitFillFromHistory(symbol, dir, sinceTs) {
   if (!enabled) return null;
   try {
-    const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 1000 });
+    const trades = await raw('GET', '/fapi/v1/userTrades', { symbol, limit: 500 });
     if (!Array.isArray(trades)) return null;
     const closeSide = dir === 'long' ? 'SELL' : 'BUY';
     const mine = trades.filter(t =>
