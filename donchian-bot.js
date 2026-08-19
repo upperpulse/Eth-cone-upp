@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v5.5';
+const BOT_VERSION = 'v5.6';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -337,35 +337,25 @@ async function reconcile() {
       const conn = await live.testConnection(5 * 60 * 1000);   // cache 5 นาที ลด API call
       if (conn.ok && conn.balance > 0) {
         const flat = SYMBOLS.every(s2 => !positions[s2]);
-        let floatPnl = 0, known = true;
-        for (const s2 of SYMBOLS) {
-          const p2 = positions[s2];
-          if (!p2) continue;
-          const px = dashCache[s2]?.price;
-          if (!px) { known = false; break; }
-          floatPnl += p2.dir === 'long' ? (px - p2.entry) * p2.qty : (p2.entry - px) * p2.qty;
-        }
-        // ไม่รู้ราคาปัจจุบัน → ข้ามเฉพาะการเทียบ equity (ไม่ข้ามการตรวจ position/SL)
-        if (known) {
-          const exchangeRealized = conn.balance - floatPnl;
-          const drift = exchangeRealized - accountEquity;
-          const driftPct = Math.abs(drift) / conn.balance * 100;
-          const now = Date.now();
-          if (driftPct > 1.5 && now - (health.lastDriftAlert || 0) > 3600000) {
-            health.lastDriftAlert = now;
-            await logError(driftPct > 4 ? 'critical' : 'warn', 'EQUITY_DRIFT', null,
-              `equity bot $${f(accountEquity)} vs exchange(realized) $${f(exchangeRealized)} — ต่าง $${f(drift)} (${driftPct.toFixed(2)}%)` +
-              (floatPnl ? ` [balance $${f(conn.balance)} − กำไรลอย $${f(floatPnl)}]` : ''),
-              { bot: +accountEquity.toFixed(2), exchangeBalance: conn.balance,
-                floatPnl: +floatPnl.toFixed(2), exchangeRealized: +exchangeRealized.toFixed(2),
-                drift: +drift.toFixed(2), driftPct: +driftPct.toFixed(3) });
-            if (flat) {
-              const old = accountEquity;
-              accountEquity = conn.balance;
-              if (accountEquity > peakEquity) peakEquity = accountEquity;
-              saveState();
-              await tg(`🔄 <b>ปรับ equity ให้ตรง Binance</b>\n$${f(old)} → $${f(conn.balance)}\n(ต่าง $${f(drift)} จาก fee/funding สะสม)`);
-            }
+        // ⚠️ Binance walletBalance = ยอด realized แล้ว "ไม่รวม" กำไรลอยอยู่แล้ว
+        // เดิมเอาไปลบกำไรลอยอีก = หัก 2 ครั้ง → drift ปลอม ($13 กลายเป็น $104)
+        // accountEquity ของบอทก็เป็น realized เหมือนกัน → เทียบตรงๆ ได้เลย
+        const drift = conn.balance - accountEquity;
+        const driftPct = Math.abs(drift) / conn.balance * 100;
+        const now = Date.now();
+        if (driftPct > 1.5 && now - (health.lastDriftAlert || 0) > 3600000) {
+          health.lastDriftAlert = now;
+          await logError(driftPct > 4 ? 'critical' : 'warn', 'EQUITY_DRIFT', null,
+            `equity bot $${f(accountEquity)} vs walletBalance $${f(conn.balance)} — ต่าง $${f(drift)} (${driftPct.toFixed(2)}%)` +
+            (flat ? '' : ' [ยังถือ position — fee ของไม้ที่เปิดค้างยังไม่ถูกบันทึกในบอท]'),
+            { bot: +accountEquity.toFixed(2), walletBalance: conn.balance,
+              drift: +drift.toFixed(2), driftPct: +driftPct.toFixed(3), flat });
+          if (flat) {
+            const old = accountEquity;
+            accountEquity = conn.balance;
+            if (accountEquity > peakEquity) peakEquity = accountEquity;
+            saveState();
+            await tg(`🔄 <b>ปรับ equity ให้ตรง Binance</b>\n$${f(old)} → $${f(conn.balance)}\n(ต่าง $${f(drift)} จาก fee/funding สะสม)`);
           }
         }
       }
