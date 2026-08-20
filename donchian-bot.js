@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v5.7';
+const BOT_VERSION = 'v5.8';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -912,8 +912,12 @@ async function closePosition(symbol, exit, reason) {
           exitFill = f.price;
           liveFeeExit = f.fee;
           liveRealizedPnl = f.realizedPnl;
-          const sa = dir === 'long' ? exit - f.price : f.price - exit;
-          slipExit = +((sa / exit) * 10000).toFixed(2);
+          // ⚠️ วัด slippage เทียบกับ "ราคา SL ที่ตั้งใจ" ไม่ใช่ราคาปิดแท่งตอน reconcile เจอ
+          // (reconcile ช้าได้ถึง 10 นาที — ถ้าเทียบกับราคาตอนนั้นจะได้ตัวเลขปลอม)
+          const intended = position.sl;
+          const sa = dir === 'long' ? intended - f.price : f.price - intended;
+          slipExit = +((sa / intended) * 10000).toFixed(2);
+          exit = f.price;   // ใช้ราคา fill จริงเป็นราคาปิด (แม่นกว่าราคาแท่ง)
           console.log(`[${symbol}] ดึงราคาปิดจริงจาก SL: $${f.price} (PnL จริง $${f.realizedPnl})`);
         }
       } catch (e) {}
