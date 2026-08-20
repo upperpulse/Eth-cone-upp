@@ -6,7 +6,7 @@ require('dotenv').config();  // โหลด .env (TG token + Binance testnet ke
 //  ⚠️ PAPER MODE — ยังไม่ส่ง order จริง
 // ═══════════════════════════════════════════════════════════
 
-const BOT_VERSION = 'v5.6';
+const BOT_VERSION = 'v5.7';
 const fs   = require('fs');
 const http = require('http');
 let live;
@@ -429,7 +429,7 @@ async function reconcile() {
     // ทั้งคู่ FLAT แต่มี SL ค้าง → ลบทิ้ง (ถ้า trigger จะเปิดไม้ที่ไม่มีใครสั่ง!)
     else if (!botPos && !exPos && live.getOpenStops && live.sweepStops) {
       try {
-        const stray = (await live.getOpenStops(symbol, 120000)).filter(o => o.symbol === symbol);
+        const stray = (await live.getOpenStops(symbol, 20000)).filter(o => o.symbol === symbol);
         if (stray.length) {
           const r = await live.sweepStops(symbol, null);
           await logError('warn', 'STRAY_STOP_CLEANED', symbol,
@@ -454,7 +454,7 @@ async function reconcile() {
     else if (botPos && exPos) {
       if (live.getOpenStops) {
         try {
-          const stops = (await live.getOpenStops(symbol, 120000)).filter(o => o.symbol === symbol);
+          const stops = (await live.getOpenStops(symbol, 20000)).filter(o => o.symbol === symbol);
           if (!stops.length) {
             // ยืนยันซ้ำแบบไม่ใช้ cache — rate limit/สะดุดอาจทำให้ query แรกได้ [] ผิดๆ
             // ถ้าไม่เช็ค จะวาง SL ซ้ำแล้วต้องมาลบทีหลัง (วนลูปกิน API)
@@ -490,8 +490,11 @@ async function reconcile() {
             if (stops.length > 1 && live.sweepStops) {
               stops.sort((a, b) => (b.updateTime || 0) - (a.updateTime || 0));
               const r = await live.sweepStops(symbol, stops[0].id);
-              await logError('warn', 'DUP_STOP_SWEPT', symbol,
-                `พบ SL ซ้ำ ${stops.length} อัน — ลบส่วนเกิน ${r.removed} อัน (เหลือ ${r.remaining})`);
+              await logError(r.remaining > 1 ? 'critical' : 'warn',
+                r.remaining > 1 ? 'DUP_STOP_STUCK' : 'DUP_STOP_SWEPT', symbol,
+                r.remaining > 1
+                  ? `กวาด SL ซ้ำแล้วยังเหลือ ${r.remaining} อัน — ลบไม่สำเร็จ เสี่ยง trigger ซ้อน`
+                  : `พบ SL ซ้ำ ${stops.length} อัน — ลบส่วนเกิน ${r.removed} อัน (เหลือ ${r.remaining})`);
               botPos.stopOrderId = stops[0].id;
             }
             // ราคา SL บน exchange ต่างจากที่ bot คิดมาก → sync ใหม่

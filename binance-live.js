@@ -214,15 +214,25 @@ async function cancelStop(symbol, ref) {
 // ป้องกัน order สะสมจาก trail ที่ลบไม่สำเร็จ
 async function sweepStops(symbol, keepId = null) {
   if (!enabled) return { removed: 0, remaining: 0 };
-  const stops = (await getOpenStops(symbol)).filter(o => o.symbol === symbol);
-  let removed = 0;
-  for (const o of stops) {
-    if (keepId && String(o.id) === String(keepId)) continue;
-    if (await cancelStop(symbol, o)) removed++;
+  // ต้องใช้ข้อมูลสด (maxAge 0) — ถ้าใช้ cache จะเห็น SL ไม่ครบ
+  // เคยเจอ: "เจอ 2 ลบ 1 เหลือ 2" เพราะจริงๆ มี 3 อันแต่ cache เห็นแค่ 2
+  let removed = 0, remaining = 0;
+  for (let round = 1; round <= 2; round++) {
+    const stops = (await getOpenStops(symbol, 0)).filter(o => o.symbol === symbol);
+    const extras = stops.filter(o => !(keepId && String(o.id) === String(keepId)));
+    if (!extras.length) { remaining = stops.length; break; }
+    for (const o of extras) if (await cancelStop(symbol, o)) removed++;
+    const after = (await getOpenStops(symbol, 0)).filter(o => o.symbol === symbol);
+    remaining = after.length;
+    // เหลือตามที่ควร → จบ ไม่ต้องวนอีกรอบ
+    if (remaining <= (keepId ? 1 : 0)) break;
+    if (round === 2) {
+      console.log(`[LIVE] ⚠️ ${symbol} กวาดแล้วยังเหลือ ${remaining} อัน (ลบไม่สำเร็จบางตัว)`);
+      staleStops[symbol] = true;
+    }
   }
-  const after = (await getOpenStops(symbol)).filter(o => o.symbol === symbol);
-  if (removed) console.log(`[LIVE] ${symbol} กวาด SL ส่วนเกิน ${removed} อัน (เหลือ ${after.length})`);
-  return { removed, remaining: after.length };
+  if (removed) console.log(`[LIVE] ${symbol} กวาด SL ส่วนเกิน ${removed} อัน (เหลือ ${remaining})`);
+  return { removed, remaining };
 }
 const cancelOrder = (symbol, orderId) => cancelStop(symbol, orderId);
 
